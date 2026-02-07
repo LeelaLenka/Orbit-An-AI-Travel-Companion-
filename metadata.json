@@ -1,0 +1,8 @@
+{
+  "name": "Orbit - AI Travel Companion",
+  "description": "Orbit is an intelligent travel assistant that helps users plan risk-free journeys with budget management, currency conversion, real-time voice translation, and travel cost estimation.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
