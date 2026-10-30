@@ -24,7 +24,16 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 
 export interface User { id: string; name: string; email: string; currency: string; demo: boolean }
 export interface Usage { used: number; limit: number; remaining: number; aiEnabled: boolean }
-export interface Place { id: number; name: string; admin: string; country: string; countryCode: string; lat: number; lon: number; timezone: string; population: number }
+export interface Place {
+  id: string; name: string; detail: string; kind: string; precise: boolean;
+  admin: string; country: string; countryCode: string; lat: number; lon: number;
+}
+export interface Attraction { title: string; description: string; extract: string; image: string | null; lat: number; lon: number; distanceKm: number; url: string; views: number }
+export interface PlaceInfo {
+  about: { title: string; extract: string; image: string | null; url: string } | null;
+  country: { name: string; capital: string; region: string; currencies: { code: string; name: string; symbol: string }[]; languages: string[]; callingCode: string; drivingSide: string; timezones: string[]; flag: string } | null;
+  attractions: Attraction[];
+}
 export interface Trip { _id: string; name: string; country: string; countryCode: string; lat: number; lon: number; note: string; createdAt: string }
 export interface Weather {
   timezone: string;

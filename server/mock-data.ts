@@ -2,11 +2,25 @@
 import { deflateSync } from 'node:zlib';
 
 export const places = [
-  { id: 1, name: 'Kyoto', admin: 'Kyoto', country: 'Japan', countryCode: 'JP', lat: 35.0116, lon: 135.7681, timezone: 'Asia/Tokyo', population: 1459640 },
-  { id: 2, name: 'Munnar', admin: 'Kerala', country: 'India', countryCode: 'IN', lat: 10.0889, lon: 77.0595, timezone: 'Asia/Kolkata', population: 38471 },
-  { id: 3, name: 'Lisbon', admin: 'Lisbon', country: 'Portugal', countryCode: 'PT', lat: 38.7167, lon: -9.1333, timezone: 'Europe/Lisbon', population: 517802 },
-  { id: 4, name: 'Hyderabad', admin: 'Telangana', country: 'India', countryCode: 'IN', lat: 17.385, lon: 78.4867, timezone: 'Asia/Kolkata', population: 6809970 },
+  { id: 'R1', name: 'Kyoto', detail: 'Kyoto Prefecture, Japan', kind: 'city', precise: false, admin: 'Kyoto', country: 'Japan', countryCode: 'JP', lat: 35.0116, lon: 135.7681 },
+  { id: 'N2', name: 'Kinkaku-ji', detail: 'Kita Ward, Kyoto, Kyoto Prefecture, 603-8361, Japan', kind: 'landmark', precise: true, admin: 'Kyoto Prefecture', country: 'Japan', countryCode: 'JP', lat: 35.0394, lon: 135.7292 },
+  { id: 'R3', name: 'Vizianagaram', detail: 'Andhra Pradesh, India', kind: 'city', precise: false, admin: 'Andhra Pradesh', country: 'India', countryCode: 'IN', lat: 18.1169, lon: 83.4115 },
+  { id: 'W4', name: 'Vizianagaram Fort', detail: 'Fort Road, Vizianagaram, Andhra Pradesh, 535002, India', kind: 'landmark', precise: true, admin: 'Andhra Pradesh', country: 'India', countryCode: 'IN', lat: 18.1135, lon: 83.4019 },
+  { id: 'N5', name: '12 MG Road', detail: 'Labbipet, Vijayawada, Andhra Pradesh, 520010, India', kind: 'house', precise: true, admin: 'Andhra Pradesh', country: 'India', countryCode: 'IN', lat: 16.5062, lon: 80.648 },
 ];
+
+export function placeInfo(lat: number, lon: number, name: string) {
+  const near = (dLat: number, dLon: number) => ({ lat: lat + dLat, lon: lon + dLon });
+  return {
+    about: { title: name, extract: `${name} is a sample description. On the live site this comes from Wikipedia: history, what it is known for and why people visit.`, image: null, url: 'https://en.wikipedia.org' },
+    country: { name: 'Japan', capital: 'Tokyo', region: 'Eastern Asia', currencies: [{ code: 'JPY', name: 'Japanese yen', symbol: '¥' }], languages: ['Japanese'], callingCode: '+81', drivingSide: 'left', timezones: ['UTC+09:00'], flag: '' },
+    attractions: [
+      { title: 'Kiyomizu-dera', description: 'Buddhist temple in Kyoto, Japan', extract: 'A wooden temple famous for its veranda over the hillside (sample).', image: null, ...near(-0.016, 0.017), distanceKm: 2.4, url: 'https://en.wikipedia.org', views: 54000 },
+      { title: 'Fushimi Inari-taisha', description: 'Shinto shrine in Kyoto', extract: 'Known for thousands of vermilion torii gates (sample).', image: null, ...near(-0.044, 0.004), distanceKm: 4.9, url: 'https://en.wikipedia.org', views: 61000 },
+      { title: 'Nishiki Market', description: 'Market street in Kyoto', extract: 'A narrow covered food market (sample).', image: null, ...near(-0.006, -0.003), distanceKm: 0.7, url: 'https://en.wikipedia.org', views: 9000 },
+    ],
+  };
+}
 
 const today = new Date();
 export const weather = {

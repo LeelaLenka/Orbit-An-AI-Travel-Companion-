@@ -3,7 +3,7 @@ import { z, ZodError } from 'zod';
 import { budgetInput, planBudget, scanDestination, scanInput, usage } from './ai.js';
 import { endSession, ensureDemoUser, login, loginSchema, register, registerSchema, requireUser, startSession, toPublic } from './auth.js';
 import { DEMO } from './env.js';
-import { getRates, getSatelliteImage, getWeather, searchPlaces } from './external.js';
+import { getPlaceInfo, getRates, getSatelliteImage, getWeather, searchPlaces } from './external.js';
 import { clientIp, HttpError, readJson, sendJson, type Req, type Res } from './http.js';
 import { store, usingMemoryStore } from './store.js';
 
@@ -81,6 +81,12 @@ export async function handle(req: Req, res: Res): Promise<void> {
     if (route === 'weather' && method === 'GET') {
       const { lat, lon } = coords.parse({ lat: q('lat'), lon: q('lon') });
       return sendJson(res, 200, { weather: await getWeather(lat, lon) });
+    }
+    if (route === 'place-info' && method === 'GET') {
+      const { lat, lon } = coords.parse({ lat: q('lat'), lon: q('lon') });
+      const name = q('name').trim().slice(0, 80);
+      const cc = q('cc').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+      return sendJson(res, 200, { info: await getPlaceInfo(lat, lon, name, cc) });
     }
     if (route === 'rates' && method === 'GET') return sendJson(res, 200, await getRates());
 

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type Place } from '../lib/api';
 
-/** Search any town or city in the world (with a short debounce) */
-export function PlaceSearch({ onPick, placeholder = 'Search any city or town…' }: { onPick: (p: Place) => void; placeholder?: string }) {
+const KIND_LABEL: Record<string, string> = {
+  house: 'Address', street: 'Street', landmark: 'Place', locality: 'Area', city: 'City', region: 'Region', country: 'Country',
+};
+
+/** Search addresses, streets, villages, landmarks and cities anywhere (with a short debounce) */
+export function PlaceSearch({ onPick, placeholder = 'Search an address, landmark or city…' }: { onPick: (p: Place) => void; placeholder?: string }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Place[]>([]);
   const [open, setOpen] = useState(false);
@@ -68,7 +72,7 @@ export function PlaceSearch({ onPick, placeholder = 'Search any city or town…'
             <li key={p.id} role="option" aria-selected={i === active} className={i === active ? 'active' : ''}
                 onMouseDown={(e) => { e.preventDefault(); pick(p); }} onMouseEnter={() => setActive(i)}>
               <span className="search__name">{p.name}</span>
-              <span className="search__meta">{[p.admin, p.country].filter(Boolean).join(', ')}</span>
+              <span className="search__meta"><span className={`kind kind--${p.kind}`}>{KIND_LABEL[p.kind] ?? p.kind}</span>{p.detail}</span>
             </li>
           ))}
         </ul>

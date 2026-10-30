@@ -3,11 +3,16 @@
 Explore Earth on a 3D globe built from **yesterday's NASA satellite imagery**, check **live weather** anywhere,
 get an **AI briefing** on any town, and find destinations that **fit your budget**, in your own currency.
 
-**Live:** _add your Vercel URL_ · Demo account is shown on the login page.
+**Live:** [orbit-an-ai-travel-companion.vercel.app](https://orbit-an-ai-travel-companion.vercel.app) · demo account on the login page.
 
 ## Features
 - **3D satellite globe**: NASA GIBS VIIRS true-colour imagery from yesterday, with Blue Marble filling gaps
-- **Search any place on Earth** and fly to it; save places to your account
+- **Search exact addresses, streets, villages, landmarks and cities** (Photon / OpenStreetMap); addresses and
+  landmarks open a **street-level map** (OpenStreetMap or satellite), cities fly the globe
+- **Place overview**: description and photo (Wikipedia), plus traveller facts for the country (currency, languages,
+  calling code, driving side, time zone)
+- **Famous places within 10 km**, ranked by Wikipedia readership, with photos, pinned on the globe and map
+- **Directions** link and **saved places** per account
 - **Live weather**: current conditions and a 7-day forecast (Open-Meteo)
 - **AI destination scan** (Gemini): daily costs at three comfort levels, a cost breakdown, ways to get there,
   laws visitors could break unknowingly, customs, emergency numbers, healthy local food and safety tips
@@ -16,7 +21,7 @@ get an **AI briefing** on any town, and find destinations that **fit your budget
 - **Accounts required**, with a shared demo account for visitors; installable as an app (PWA)
 
 ## How it's built
-- **Frontend:** React 19, TypeScript, Vite, globe.gl / three.js
+- **Frontend:** React 19, TypeScript, Vite, globe.gl / three.js, Leaflet
 - **Backend:** one Vercel serverless function (TypeScript) that routes every `/api/*` request
 - **Database:** MongoDB Atlas via the official Node.js driver: users (unique email index), saved places,
   per-user daily AI usage counters (atomic `$inc` upserts) and a response cache, both cleaned up by **TTL indexes**
@@ -24,7 +29,7 @@ get an **AI briefing** on any town, and find destinations that **fit your budget
   cached in MongoDB so repeated questions cost nothing, and limited per user per day
 - **Security:** bcrypt password hashing, JWT sessions in **HttpOnly, SameSite** cookies, input validation on every
   endpoint, sign-in throttling, and the Gemini key kept server-side only
-- **Data sources (free, no keys):** Open-Meteo (geocoding + weather), ExchangeRate-API open access, NASA GIBS
+- **Data sources (free, no keys):** Photon/OpenStreetMap (search), Wikipedia (places), REST Countries, Open-Meteo (weather), ExchangeRate-API, NASA GIBS, CARTO/Esri map tiles
 
 AI costs are estimates, clearly labelled as such, and never presented as live prices.
 
@@ -46,6 +51,6 @@ Import the repo (framework: Vite) and add environment variables `MONGODB_URI`, `
 | --- | --- | --- |
 | POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | account |
 | GET | `/api/auth/me`, `/api/auth/demo` | session, demo credentials |
-| GET | `/api/places?q=`, `/api/weather?lat=&lon=`, `/api/rates`, `/api/satellite` | live data |
+| GET | `/api/places?q=`, `/api/place-info?lat=&lon=&name=&cc=`, `/api/weather?lat=&lon=`, `/api/rates`, `/api/satellite` | live data |
 | POST | `/api/ai/scan`, `/api/ai/budget` | AI (rate-limited, cached) |
 | GET, POST, DELETE | `/api/trips`, `/api/trips/:id` | saved places |
