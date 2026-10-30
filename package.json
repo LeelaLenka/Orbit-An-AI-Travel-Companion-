@@ -1,23 +1,35 @@
 {
-  "name": "orbit---ai-travel-companion",
+  "name": "orbit",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Orbit: AI travel companion with a live 3D satellite globe, weather, destination scans and a budget planner",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node --import tsx server/dev-server.ts",
+    "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit && vite build",
     "preview": "vite preview"
   },
+  "engines": { "node": ">=20" },
   "dependencies": {
-    "react": "^19.2.4",
-    "@google/genai": "^1.40.0",
-    "react-dom": "^19.2.4",
-    "recharts": "^3.7.0"
+    "@google/genai": "2.30.0",
+    "bcryptjs": "3.0.3",
+    "globe.gl": "2.46.2",
+    "jose": "6.2.12",
+    "mongodb": "7.7.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router-dom": "7.18.4",
+    "three": "0.186.1",
+    "zod": "3.24.2"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/node": "22.13.14",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tsx": "4.19.3",
+    "typescript": "5.8.3",
+    "vite": "8.3.4"
   }
 }

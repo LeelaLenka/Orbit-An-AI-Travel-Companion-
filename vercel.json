@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api?route=$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "functions": { "api/index.ts": { "maxDuration": 30 } }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Orbit: AI travel companion",
+  "short_name": "Orbit",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b1a",
+  "theme_color": "#070b1a",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
