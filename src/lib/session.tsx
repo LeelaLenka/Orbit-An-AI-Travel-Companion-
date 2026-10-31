@@ -52,7 +52,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => void refresh(), [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
   useEffect(() => {
     api<{ rates: Record<string, number> }>('rates').then((r) => setRates(r.rates)).catch(() => {});
   }, []);

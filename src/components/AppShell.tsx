@@ -13,7 +13,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
-  useEffect(() => setMenu(false), [location.pathname]);
+  useEffect(() => {
+    setMenu(false);
+  }, [location.pathname]);
   useEffect(() => {
     if (!menu) return;
     const close = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };

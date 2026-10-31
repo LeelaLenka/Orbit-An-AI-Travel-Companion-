@@ -42,8 +42,13 @@ export function Bine() {
   const rec = useRef<Recognition | null>(null);
   const end = useRef<HTMLDivElement>(null);
 
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [msgs, busy]);
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
+  // Block body on purpose: newer browsers return a Promise from scrollIntoView, and React would treat a return value as a clean-up function
+  useEffect(() => {
+    void end.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [msgs, busy]);
+  useEffect(() => () => {
+    window.speechSynthesis?.cancel();
+  }, []);
 
   const place = new URLSearchParams(location.search).get('name') ?? '';
 
