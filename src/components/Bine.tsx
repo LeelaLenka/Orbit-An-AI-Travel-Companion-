@@ -2,15 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api, type Usage } from '../lib/api';
 import { useSession } from '../lib/session';
-
-/** Languages Bine can listen and speak in (BCP-47 codes for the browser's speech engines) */
-const LANGS = [
-  { code: 'en-IN', name: 'English' }, { code: 'hi-IN', name: 'हिन्दी (Hindi)' }, { code: 'te-IN', name: 'తెలుగు (Telugu)' },
-  { code: 'ta-IN', name: 'தமிழ் (Tamil)' }, { code: 'kn-IN', name: 'ಕನ್ನಡ (Kannada)' }, { code: 'ml-IN', name: 'മലയാളം (Malayalam)' },
-  { code: 'mr-IN', name: 'मराठी (Marathi)' }, { code: 'bn-IN', name: 'বাংলা (Bengali)' }, { code: 'gu-IN', name: 'ગુજરાતી (Gujarati)' },
-  { code: 'es-ES', name: 'Español' }, { code: 'fr-FR', name: 'Français' }, { code: 'de-DE', name: 'Deutsch' },
-  { code: 'ja-JP', name: '日本語' }, { code: 'ar-SA', name: 'العربية' },
-];
+import { LANGS } from '../lib/languages';
+import { usePrefs } from '../lib/prefs';
 
 interface Msg { role: 'user' | 'model'; text: string }
 
@@ -35,14 +28,16 @@ function speak(text: string, lang: string) {
 /** "Talk to Bine": speak or type in your language; Bine answers in the same language and reads it aloud */
 export function Bine() {
   const { requireLogin, setUsage, usage } = useSession();
+  const { prefs, setPref } = usePrefs();
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const [lang, setLang] = useState(() => LANGS.find((l) => l.code.startsWith(navigator.language.slice(0, 2)))?.code ?? 'en-IN');
+  const [lang, setLang] = useState(() => prefs.bineLang || (LANGS.find((l) => l.code.startsWith(navigator.language.slice(0, 2)))?.code ?? 'en-IN'));
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(true);
+  const voiceOn = prefs.bineVoice;
+  const setVoiceOn = (v: boolean) => setPref('bineVoice', v);
   const [error, setError] = useState('');
   const rec = useRef<Recognition | null>(null);
   const end = useRef<HTMLDivElement>(null);

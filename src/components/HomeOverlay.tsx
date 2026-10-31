@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { api, type Attraction, type Featured, type PlaceInfo } from '../lib/api';
 import { useSession } from '../lib/session';
 import { LocateIcon, PurposeIcon } from './Icons';
+import { usePrefs } from '../lib/prefs';
 
 /** The landing view over the globe: headline, "near you" recommendations and featured destinations with photos */
 export function HomeOverlay({ onOpen }: { onOpen: (p: { name: string; country: string; countryCode: string; lat: number; lon: number }) => void }) {
   const { locate } = useSession();
+  const { dist } = usePrefs();
   const [featured, setFeatured] = useState<Featured[]>([]);
   const [near, setNear] = useState<Attraction[] | null>(null);
   const [nearState, setNearState] = useState<'idle' | 'busy' | 'error'>('idle');
@@ -48,7 +50,7 @@ export function HomeOverlay({ onOpen }: { onOpen: (p: { name: string; country: s
                 <li key={a.title}>
                   <button onClick={() => onOpen({ name: a.title, country: '', countryCode: '', lat: a.lat, lon: a.lon })}>
                     {a.image ? <img src={a.image} alt="" loading="lazy" /> : <span className="near__ph" aria-hidden="true" />}
-                    <span><strong>{a.title}</strong><span className="muted small">{a.distanceKm} km · {a.description || 'Landmark'}</span></span>
+                    <span><strong>{a.title}</strong><span className="muted small">{dist(a.distanceKm)} · {a.description || 'Landmark'}</span></span>
                   </button>
                 </li>
               ))}

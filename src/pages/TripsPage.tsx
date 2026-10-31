@@ -3,12 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, type SavedPlan, type Trip } from '../lib/api';
 import { useSession } from '../lib/session';
 import { PurposeIcon } from '../components/Icons';
+import { usePrefs } from '../lib/prefs';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** Upcoming trips, past trips with savings, and saved places */
 export function TripsPage() {
   const { user, requireLogin, money } = useSession();
+  const { dist } = usePrefs();
   const [params] = useSearchParams();
   const [plans, setPlans] = useState<SavedPlan[] | null>(null);
   const [places, setPlaces] = useState<Trip[]>([]);
@@ -58,7 +60,7 @@ export function TripsPage() {
       <section className="stats-row">
         <div className="stat-card"><span>Saved with Orbit</span><strong className="grad">{money(saved)}</strong><em>vs typical trip costs</em></div>
         <div className="stat-card"><span>Trips completed</span><strong>{past.length}</strong><em>{upcoming.length} coming up</em></div>
-        <div className="stat-card"><span>Distance travelled</span><strong>{Math.round(km).toLocaleString()} km</strong><em>there and back, straight-line</em></div>
+        <div className="stat-card"><span>Distance travelled</span><strong>{dist(km)}</strong><em>there and back, straight-line</em></div>
       </section>
 
       <div className="tabs tabs--page" role="tablist">

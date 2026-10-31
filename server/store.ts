@@ -23,6 +23,9 @@ export interface Store {
   findUserById(id: string): Promise<UserDoc | null>;
   insertUser(u: UserDoc): Promise<void>;
   updateUserCurrency(id: string, currency: string): Promise<void>;
+  updateUser(id: string, fields: Partial<Pick<UserDoc, 'name' | 'passwordHash' | 'currency'>>): Promise<void>;
+  /** Removes the account and everything that belongs to it */
+  deleteUser(id: string): Promise<void>;
   listTrips(userId: string): Promise<TripDoc[]>;
   insertTrip(t: TripDoc): Promise<void>;
   deleteTrip(userId: string, id: string): Promise<boolean>;
@@ -73,6 +76,14 @@ const mongoStore: Store = {
   async findUserById(id) { return (await col<UserDoc>('users')).findOne({ _id: id }); },
   async insertUser(u) { await (await col<UserDoc>('users')).insertOne(u); },
   async updateUserCurrency(id, currency) { await (await col<UserDoc>('users')).updateOne({ _id: id }, { $set: { currency } }); },
+  async updateUser(id, fields) { await (await col<UserDoc>('users')).updateOne({ _id: id }, { $set: fields }); },
+  async deleteUser(id) {
+    await Promise.all([
+      (await col<TripDoc>('trips')).deleteMany({ userId: id }),
+      (await col<PlanDoc>('plans')).deleteMany({ userId: id }),
+    ]);
+    await (await col<UserDoc>('users')).deleteOne({ _id: id });
+  },
   async listTrips(userId) { return (await col<TripDoc>('trips')).find({ userId }).sort({ createdAt: -1 }).limit(100).toArray(); },
   async insertTrip(t) { await (await col<TripDoc>('trips')).insertOne(t); },
   async deleteTrip(userId, id) { return (await (await col<TripDoc>('trips')).deleteOne({ _id: id, userId })).deletedCount === 1; },
@@ -121,6 +132,12 @@ const memoryStore: Store = {
     mem.users.set(u._id, u);
   },
   async updateUserCurrency(id, currency) { const u = mem.users.get(id); if (u) u.currency = currency; },
+  async updateUser(id, fields) { const u = mem.users.get(id); if (u) Object.assign(u, fields); },
+  async deleteUser(id) {
+    for (const [k, t] of mem.trips) if (t.userId === id) mem.trips.delete(k);
+    for (const [k, p] of mem.plans) if (p.userId === id) mem.plans.delete(k);
+    mem.users.delete(id);
+  },
   async listTrips(userId) { return [...mem.trips.values()].filter((t) => t.userId === userId).sort((a, b) => +b.createdAt - +a.createdAt); },
   async insertTrip(t) { mem.trips.set(t._id, t); },
   async deleteTrip(userId, id) { const t = mem.trips.get(id); return !!t && t.userId === userId && mem.trips.delete(id); },

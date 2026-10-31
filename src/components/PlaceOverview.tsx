@@ -1,9 +1,11 @@
 import type { Attraction, PlaceInfo } from '../lib/api';
+import { usePrefs } from '../lib/prefs';
 
 /** About the place (Wikipedia), practical country facts, and a preview of famous places */
 export function PlaceOverview({ info, loading, onShowAll, onPick }: {
   info: PlaceInfo | null; loading: boolean; onShowAll: () => void; onPick: (a: Attraction) => void;
 }) {
+  const { dist } = usePrefs();
   if (loading) return <div className="skeleton" style={{ height: 260 }} aria-label="Loading place details" />;
   if (!info) return <p className="muted">Details aren’t available right now.</p>;
   const c = info.country;
@@ -27,7 +29,7 @@ export function PlaceOverview({ info, loading, onShowAll, onPick }: {
               <li key={a.title}>
                 <button onClick={() => onPick(a)}>
                   {a.image ? <img src={a.image} alt="" loading="lazy" /> : <span className="mini-places__ph" aria-hidden="true" />}
-                  <span><strong>{a.title}</strong><span className="muted small">{a.distanceKm} km away</span></span>
+                  <span><strong>{a.title}</strong><span className="muted small">{dist(a.distanceKm)} away</span></span>
                 </button>
               </li>
             ))}

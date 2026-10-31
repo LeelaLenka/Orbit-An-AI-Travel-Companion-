@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Marker } from './GlobeView';
+import { usePrefs } from '../lib/prefs';
 
 const LAYERS = {
   // OpenStreetMap's own tiles: no key needed; darkened with a CSS filter to match the app
@@ -32,13 +33,14 @@ export function MapView({ markers, focus, zoom, onMarkerClick, path }: {
   const map = useRef<L.Map | null>(null);
   const tiles = useRef<L.TileLayer | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
-  const [style, setStyle] = useState<keyof typeof LAYERS>('map');
+  const { prefs } = usePrefs();
+  const [style, setStyle] = useState<keyof typeof LAYERS>(prefs.mapStyle);
 
   useEffect(() => {
     if (!holder.current) return;
     const m = L.map(holder.current, { zoomControl: false, worldCopyJump: true }).setView([20, 78], 4);
     L.control.zoom({ position: 'bottomleft' }).addTo(m);
-    L.control.scale({ position: 'bottomleft', imperial: false }).addTo(m);
+    L.control.scale({ position: 'bottomleft', imperial: prefs.distance === 'mi', metric: prefs.distance === 'km' }).addTo(m);
     layer.current = L.layerGroup().addTo(m);
     map.current = m;
     const ro = new ResizeObserver(() => m.invalidateSize());

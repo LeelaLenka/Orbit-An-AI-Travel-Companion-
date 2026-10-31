@@ -267,7 +267,10 @@ export const chatInput = z.object({
   place: z.string().trim().max(160).default(''),
 });
 
-export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>): Promise<{ reply: string; sample: boolean }> {
+/** What Bine knows about the signed-in user, so it can answer about their own trips and places */
+export interface BineContext { currency: string; upcoming: string[]; past: string[]; saved: string[]; today: string }
+
+export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>, ctx: BineContext): Promise<{ reply: string; sample: boolean }> {
   if (!ai) return { reply: `(Sample) I am Bine. Add a Gemini key and I will answer in ${input.language}.`, sample: true };
   await spendOne(u);
   try {
@@ -278,10 +281,14 @@ export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>): Pro
         temperature: 0.6,
         maxOutputTokens: 400,
         systemInstruction:
-          `You are Bine, the friendly travel assistant inside the Orbit app. Reply in the same language the user writes in; if unsure, use ${input.language}. ` +
-          'Your reply will be read aloud, so use short plain sentences, no markdown, no lists longer than 4 items, at most about 110 words. ' +
-          'Help with places, routes, budgets, culture, safety, weather and trip planning. Prices are estimates; say so. ' +
-          (input.place ? `The user is currently looking at: ${input.place}.` : ''),
+          `You are Bine, the friendly assistant inside the Orbit travel app. Reply in the same language the user writes in; if unsure, use ${input.language}. ` +
+          'Your reply will be read aloud, so use short plain sentences, no markdown, no lists longer than 4 items, at most about 120 words. ' +
+          'You can help with anything the user asks: travel, places, routes, budgets, culture, safety, weather and trip planning, and also general questions. ' +
+          'For prices, give estimates and say so. Be honest when you are unsure, and do not make up facts. ' +
+          'Orbit features you can point the user to: Explore (globe, street map, famous places, travel times by walk/bike/car/flight/ship), Plan a trip, Budget planner, My trips, Settings. ' +
+          `\nAbout this user: name ${u.name}; preferred currency ${ctx.currency}; today is ${ctx.today}. ` +
+          `Upcoming trips: ${ctx.upcoming.join('; ') || 'none'}. Past trips: ${ctx.past.join('; ') || 'none'}. Saved places: ${ctx.saved.join(', ') || 'none'}. ` +
+          (input.place ? `They are currently looking at: ${input.place}.` : ''),
       },
     });
     const text = (r.text ?? '').trim();

@@ -6,6 +6,8 @@ import { BudgetPage } from './pages/BudgetPage';
 import { ExplorePage } from './pages/ExplorePage';
 import { PlanPage } from './pages/PlanPage';
 import { TripsPage } from './pages/TripsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { PrefsProvider } from './lib/prefs';
 
 function Gate() {
   const { loading } = useSession();
@@ -18,6 +20,7 @@ function Gate() {
         <Route path="/budget" element={<BudgetPage />} />
         <Route path="/plan" element={<PlanPage />} />
         <Route path="/trips" element={<TripsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/saved" element={<Navigate to="/trips" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -27,10 +30,12 @@ function Gate() {
 
 export function App() {
   return (
-    <SessionProvider>
-      <BrowserRouter>
-        <Gate />
-      </BrowserRouter>
-    </SessionProvider>
+    <PrefsProvider>
+      <SessionProvider>
+        <BrowserRouter>
+          <Gate />
+        </BrowserRouter>
+      </SessionProvider>
+    </PrefsProvider>
   );
 }

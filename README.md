@@ -25,6 +25,9 @@ get an **AI briefing** on any town, and find destinations that **fit your budget
 - **Bine**, a multilingual voice assistant: speak in English, Hindi, Telugu, Tamil and more, and hear the answer in
   the same language (Web Speech API + Gemini)
 - **Browse without an account**; saving, planning, budgets and Bine ask you to log in when you use them
+- **Settings**: dark / light / system theme, °C or °F, km or miles, default map style, Bine voice and language, reduced motion
+- **Account settings**: change name, password and default currency, see today's AI usage, delete the account (and all its data)
+- **Bine knows your context**: your currency, upcoming and past trips and saved places, and answers general questions too
 - **Live weather**: current conditions and a 7-day forecast (Open-Meteo)
 - **AI destination scan** (Gemini): daily costs at three comfort levels, a cost breakdown, ways to get there,
   laws visitors could break unknowingly, customs, emergency numbers, healthy local food and safety tips
@@ -71,3 +74,6 @@ Import the repo (framework: Vite) and add environment variables `MONGODB_URI`, `
 | GET | `/api/places?q=`, `/api/place-info?lat=&lon=&name=&cc=`, `/api/weather?lat=&lon=`, `/api/rates`, `/api/satellite` | live data |
 | POST | `/api/ai/scan`, `/api/ai/budget` | AI (rate-limited, cached) |
 | GET, POST, DELETE | `/api/trips`, `/api/trips/:id` | saved places |
+| POST, GET, DELETE | `/api/plans/draft`, `/api/plans`, `/api/plans/:id/complete`, `/api/plans/:id` | trip plans |
+| POST | `/api/assistant` | Bine |
+| PUT, DELETE | `/api/me/profile`, `/api/me/password`, `/api/me/currency`, `/api/me` | account |

@@ -48,7 +48,7 @@ export function GlobeView({ markers, focus, onImageryDate }: {
     }
     globe.current = g;
     const controls = g.controls();
-    controls.autoRotate = true;
+    controls.autoRotate = document.documentElement.dataset.motion !== 'reduce';
     controls.autoRotateSpeed = 0.45;
     controls.enableDamping = true;
     g.pointOfView({ lat: 18, lng: 78, altitude: 2.3 }, 0);
@@ -86,7 +86,7 @@ export function GlobeView({ markers, focus, onImageryDate }: {
   useEffect(() => {
     const g = globe.current;
     if (!g) return;
-    g.controls().autoRotate = !focus;
+    g.controls().autoRotate = !focus && document.documentElement.dataset.motion !== 'reduce';
     if (focus) g.pointOfView({ lat: focus.lat, lng: focus.lon, altitude: 1.35 }, 1600);
   }, [focus]);
 

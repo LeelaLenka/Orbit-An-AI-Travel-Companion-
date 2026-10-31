@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { api, type Weather } from '../lib/api';
 import { clock, dayName, describe } from '../lib/weather';
 import { WeatherIcon } from './WeatherIcon';
+import { usePrefs } from '../lib/prefs';
 
 /** Live conditions and 7-day forecast for a coordinate */
 export function WeatherCard({ lat, lon }: { lat: number; lon: number }) {
+  const { temp, speed, prefs } = usePrefs();
   const [w, setW] = useState<Weather | null>(null);
   const [error, setError] = useState('');
 
@@ -25,13 +27,13 @@ export function WeatherCard({ lat, lon }: { lat: number; lon: number }) {
       <div className="weather__now">
         <WeatherIcon sky={now.sky} night={!w.current.isDay} size={56} />
         <div>
-          <p className="weather__temp">{Math.round(w.current.temperature)}°<span>C</span></p>
-          <p className="muted">{now.label} · feels like {Math.round(w.current.feelsLike)}°</p>
+          <p className="weather__temp">{temp(w.current.temperature)}<span>{prefs.temperature}</span></p>
+          <p className="muted">{now.label} · feels like {temp(w.current.feelsLike)}</p>
         </div>
       </div>
       <dl className="stats">
         <div><dt>Humidity</dt><dd>{w.current.humidity}%</dd></div>
-        <div><dt>Wind</dt><dd>{Math.round(w.current.windSpeed)} km/h</dd></div>
+        <div><dt>Wind</dt><dd>{speed(w.current.windSpeed)}</dd></div>
         <div><dt>Sunrise</dt><dd>{clock(w.daily[0]?.sunrise ?? '')}</dd></div>
         <div><dt>Sunset</dt><dd>{clock(w.daily[0]?.sunset ?? '')}</dd></div>
       </dl>
@@ -42,7 +44,7 @@ export function WeatherCard({ lat, lon }: { lat: number; lon: number }) {
             <li key={d.date} title={s.label}>
               <span className="forecast__day">{dayName(d.date, i)}</span>
               <WeatherIcon sky={s.sky} size={26} />
-              <span className="forecast__temp">{Math.round(d.max)}° <em>{Math.round(d.min)}°</em></span>
+              <span className="forecast__temp">{temp(d.max)} <em>{temp(d.min)}</em></span>
               <span className="forecast__rain">{d.rainChance}%</span>
             </li>
           );

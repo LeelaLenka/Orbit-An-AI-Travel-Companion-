@@ -5,6 +5,8 @@ import { useSession } from '../lib/session';
 import { duration } from '../components/GettingThere';
 import { LocateIcon, ModeIcon, PinIcon, PurposeIcon } from '../components/Icons';
 import { PlaceSearch } from '../components/PlaceSearch';
+import { CurrencySelect } from '../components/CurrencySelect';
+import { usePrefs } from '../lib/prefs';
 
 type Spot = { name: string; country?: string; countryCode?: string; lat: number; lon: number };
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -14,6 +16,7 @@ export function PlanPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { requireLogin, locate, money, toUSD, currency, setUsage, usage } = useSession();
+  const { dist } = usePrefs();
   const [purpose, setPurpose] = useState<Purpose>('Vacation');
   const [dest, setDest] = useState<Spot | null>(null);
   const [origin, setOrigin] = useState<Spot | null>(null);
@@ -113,7 +116,10 @@ export function PlanPage() {
           <label className="field">Leaving<input type="date" required value={form.start} min={iso(new Date())} onChange={set('start')} /></label>
           <label className="field">Returning<input type="date" required value={form.end} min={form.start} onChange={set('end')} /></label>
           <label className="field">Travellers<input type="number" min={1} max={12} required value={form.travellers} onChange={set('travellers')} /></label>
-          <label className="field"><span>Budget ({currency}) <span className="muted">(optional)</span></span><input inputMode="decimal" value={form.budget} onChange={set('budget')} placeholder="e.g. 40000" /></label>
+          <div className="money-row">
+            <label className="field"><span>Budget ({currency}) <span className="muted">(optional)</span></span><input inputMode="decimal" value={form.budget} onChange={set('budget')} placeholder="e.g. 40000" /></label>
+            <CurrencySelect />
+          </div>
           <label className="field plan-form__wide"><span>Anything else? <span className="muted">(optional)</span></span><input maxLength={200} value={form.notes} onChange={set('notes')} placeholder="e.g. vegetarian food, travelling with grandparents, prefer trains" /></label>
         </div>
         <div className="row">
@@ -133,7 +139,7 @@ export function PlanPage() {
               <div className="tags">
                 <span className="tag tag--ai">AI plan</span>
                 {draft.sample && <span className="tag tag--warn">Sample data</span>}
-                <span className="tag">{draft.route.straightKm.toLocaleString()} km away</span>
+                <span className="tag">{dist(draft.route.straightKm)} away</span>
               </div>
             </div>
             <div className="plan-total">

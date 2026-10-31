@@ -135,7 +135,7 @@ const NOT_ATTRACTION = /\b(constituency|mandal|tehsil|taluk|village|census town|
 /** Wikipedia (place description + famous places nearby) and REST Countries (facts), cached for a week */
 export async function getPlaceInfo(lat: number, lon: number, name: string, countryCode: string): Promise<PlaceInfo> {
   if (env.mockExternal) return mock.placeInfo(lat, lon, name);
-  const key = `info:v1:${lat.toFixed(3)},${lon.toFixed(3)}:${name.toLowerCase()}:${countryCode}`;
+  const key = `info:v2:${lat.toFixed(3)},${lon.toFixed(3)}:${name.toLowerCase()}:${countryCode}`;
   const cached = await store.cacheGet<PlaceInfo>(key);
   if (cached) return cached;
 
@@ -164,7 +164,7 @@ export async function getPlaceInfo(lat: number, lon: number, name: string, count
 async function wikiNearby(lat: number, lon: number): Promise<(Attraction & { pageTitle: string })[]> {
   const url = 'https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2' +
     `&generator=geosearch&ggscoord=${lat}|${lon}&ggsradius=10000&ggslimit=40` +
-    '&prop=coordinates|pageimages|description|extracts|pageviews&piprop=thumbnail&pithumbsize=480' +
+    '&prop=coordinates|pageimages|description|extracts|pageviews&piprop=thumbnail&pithumbsize=500' +
     '&exintro=1&explaintext=1&exsentences=2&exlimit=20&pvipdays=30';
   const r = await fetch(url, { signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': UA } });
   if (!r.ok) throw new Error('wiki');
@@ -390,17 +390,18 @@ export interface Featured { name: string; country: string; cc: string; lat: numb
 
 export async function getFeatured(): Promise<Featured[]> {
   if (env.mockExternal) return FEATURED.map(({ wiki: _w, ...f }) => ({ ...f, image: null, blurb: 'Sample description' }));
-  const cached = await store.cacheGet<Featured[]>('featured:v1');
+  const cached = await store.cacheGet<Featured[]>('featured:v2');
   if (cached) return cached;
   const out = await Promise.all(FEATURED.map(async ({ wiki, ...f }) => {
     try {
-      const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wiki}`, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': UA } });
+      const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wiki}?redirect=true`, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': UA } });
       const d = (await r.json()) as { thumbnail?: { source: string }; originalimage?: { source: string }; description?: string };
-      return { ...f, image: d.thumbnail?.source?.replace(/\/\d+px-/, '/640px-') ?? null, blurb: d.description ?? '' };
+      // Wikipedia only serves standard thumbnail sizes, so use the one it returns as-is
+      return { ...f, image: d.thumbnail?.source ?? null, blurb: d.description ?? '' };
     } catch {
       return { ...f, image: null, blurb: '' };
     }
   }));
-  await store.cacheSet('featured:v1', out, 7 * 86_400);
+  await store.cacheSet('featured:v2', out, 7 * 86_400);
   return out;
 }

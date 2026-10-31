@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type BudgetPlan, type Usage } from '../lib/api';
 import { useSession } from '../lib/session';
+import { CurrencySelect } from '../components/CurrencySelect';
 
 const TIER_INFO = {
   cheap: { title: 'Cheap', note: 'Comfortably under budget' },
@@ -49,11 +50,14 @@ export function BudgetPage() {
       <header className="page__head">
         <p className="eyebrow">Budget planner</p>
         <h1>Where can my budget take me?</h1>
-        <p className="muted">Enter your total budget in {currency}. Orbit suggests destinations at three price levels, with costs converted at today’s exchange rate.</p>
+        <p className="muted">Enter your total budget in any currency. Orbit suggests destinations at three price levels, with costs converted at today’s exchange rate.</p>
       </header>
 
       <form className="panel budget-form" onSubmit={submit}>
-        <label className="field">Total budget ({currency})<input required inputMode="decimal" value={form.amount} onChange={set('amount')} placeholder="e.g. 80000" /></label>
+        <div className="money-row">
+          <label className="field">Total budget ({currency})<input required inputMode="decimal" value={form.amount} onChange={set('amount')} placeholder="e.g. 80000" /></label>
+          <CurrencySelect />
+        </div>
         <label className="field">Travelling from<input required maxLength={80} value={form.from} onChange={set('from')} placeholder="e.g. Hyderabad" /></label>
         <label className="field">Days<input required type="number" min={1} max={60} value={form.days} onChange={set('days')} /></label>
         <label className="field">Travellers<input required type="number" min={1} max={12} value={form.travellers} onChange={set('travellers')} /></label>

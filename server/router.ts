@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { z, ZodError } from 'zod';
 import { askBine, budgetInput, chatInput, draftPlan, planBudget, planInput, scanDestination, scanInput, usage } from './ai.js';
 import { endSession, ensureDemoUser, login, loginSchema, register, registerSchema, requireUser, startSession, toPublic } from './auth.js';
@@ -99,6 +100,27 @@ export async function handle(req: Req, res: Res): Promise<void> {
     const user = await requireUser(req);
 
     if (route === 'auth/me' && method === 'GET') return sendJson(res, 200, { user: toPublic(user), usage: await usage(user) });
+    if (route === 'me/profile' && method === 'PUT') {
+      const { name } = z.object({ name: z.string().trim().min(1, 'Enter your name').max(60) }).parse(await readJson(req));
+      if (user.email === DEMO.email) throw new HttpError(403, 'The shared demo account can’t be renamed. Create your own account to change settings.');
+      await store.updateUser(user._id, { name });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (route === 'me/password' && method === 'PUT') {
+      const body = z.object({ current: z.string().min(1).max(100), next: z.string().min(8, 'Use at least 8 characters').max(100) }).parse(await readJson(req));
+      if (user.email === DEMO.email) throw new HttpError(403, 'The demo account’s password can’t be changed.');
+      if (!(await bcrypt.compare(body.current, user.passwordHash))) throw new HttpError(400, 'Your current password is incorrect.');
+      await store.updateUser(user._id, { passwordHash: await bcrypt.hash(body.next, 12) });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (route === 'me' && method === 'DELETE') {
+      const { password } = z.object({ password: z.string().min(1).max(100) }).parse(await readJson(req));
+      if (user.email === DEMO.email) throw new HttpError(403, 'The shared demo account can’t be deleted.');
+      if (!(await bcrypt.compare(password, user.passwordHash))) throw new HttpError(400, 'That password is incorrect.');
+      await store.deleteUser(user._id);
+      endSession(res);
+      return sendJson(res, 200, { ok: true });
+    }
     if (route === 'me/currency' && method === 'PUT') {
       const { currency } = currencyInput.parse(await readJson(req));
       await store.updateUserCurrency(user._id, currency);
@@ -115,7 +137,15 @@ export async function handle(req: Req, res: Res): Promise<void> {
     }
 
     if (route === 'assistant' && method === 'POST') {
-      const r = await askBine(user, chatInput.parse(await readJson(req)));
+      const input = chatInput.parse(await readJson(req));
+      const [plans, places] = await Promise.all([store.listPlans(user._id), store.listTrips(user._id)]);
+      const ctx = {
+        currency: user.currency, today: new Date().toISOString().slice(0, 10),
+        upcoming: plans.filter((p) => p.status === 'upcoming').slice(0, 5).map((p) => `${p.purpose} trip to ${p.destination.name} from ${p.origin.name}, ${p.startDate} to ${p.endDate}, ${p.travellers} people`),
+        past: plans.filter((p) => p.status === 'completed').slice(0, 5).map((p) => `${p.destination.name} (${p.startDate})`),
+        saved: places.slice(0, 10).map((t) => t.name),
+      };
+      const r = await askBine(user, input, ctx);
       return sendJson(res, 200, { ...r, usage: await usage(user) });
     }
 

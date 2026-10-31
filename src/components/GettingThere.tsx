@@ -4,6 +4,7 @@ import { api, type Mode, type Place, type RouteInfo } from '../lib/api';
 import { useSession } from '../lib/session';
 import { LocateIcon, ModeIcon } from './Icons';
 import { PlaceSearch } from './PlaceSearch';
+import { usePrefs } from '../lib/prefs';
 
 const LABEL: Record<Mode, string> = { walk: 'Walk', bike: 'Bike', car: 'Car', flight: 'Flight', ship: 'Ship' };
 
@@ -17,6 +18,7 @@ export function duration(min: number): string {
 /** Distance and travel time by every mode, from your location or any place you choose */
 export function GettingThere({ to }: { to: { name: string; lat: number; lon: number } }) {
   const { locate, myLocation } = useSession();
+  const { dist } = usePrefs();
   const [from, setFrom] = useState<{ name: string; lat: number; lon: number } | null>(myLocation ? { name: 'Your location', ...myLocation } : null);
   const [route, setRoute] = useState<RouteInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +61,7 @@ export function GettingThere({ to }: { to: { name: string; lat: number; lon: num
       {route && (
         <>
           <p className="travel__straight">
-            <strong>{route.straightKm.toLocaleString()} km</strong> <span className="muted">in a straight line (great-circle distance)</span>
+            <strong>{dist(route.straightKm)}</strong> <span className="muted">in a straight line (great-circle distance)</span>
           </p>
           <ul className="modes">
             {route.modes.map((m) => (
@@ -67,7 +69,7 @@ export function GettingThere({ to }: { to: { name: string; lat: number; lon: num
                 <span className="mode__icon"><ModeIcon mode={m.mode} size={22} /></span>
                 <span className="mode__body">
                   <strong>{LABEL[m.mode]}</strong>
-                  <span className="muted small">{m.available ? `${m.distanceKm.toLocaleString()} km · ${m.note}` : m.note}</span>
+                  <span className="muted small">{m.available ? `${dist(m.distanceKm)} · ${m.note}` : m.note}</span>
                 </span>
                 <span className="mode__time">
                   {m.available ? duration(m.minutes) : '—'}
