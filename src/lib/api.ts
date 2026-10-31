@@ -52,3 +52,35 @@ export interface Scan {
 export interface BudgetPlan {
   tiers: { tier: 'cheap' | 'moderate' | 'expensive'; destinations: { name: string; country: string; lat: number; lon: number; estimatedTotalUSD: number; perDayUSD: number; why: string; bestFor: string }[] }[];
 }
+
+export type Mode = 'walk' | 'bike' | 'car' | 'flight' | 'ship';
+export interface ModeEstimate { mode: Mode; available: boolean; distanceKm: number; minutes: number; source: 'road network' | 'estimate'; note: string }
+export interface RouteInfo { straightKm: number; modes: ModeEstimate[]; recommended: Mode }
+export interface Hotel { name: string; kind: string; stars: string; distanceKm: number; lat: number; lon: number; website: string }
+export interface Featured { name: string; country: string; cc: string; lat: number; lon: number; tag: string; image: string | null; blurb: string }
+
+export const PURPOSES = ['Pilgrimage', 'Vacation', 'Work', 'Family', 'Adventure', 'Other'] as const;
+export type Purpose = (typeof PURPOSES)[number];
+interface Leg { mode: string; route: string; costUSD: number; duration: string; tip: string }
+export interface TripPlan {
+  summary: string; getThere: Leg; getBack: Leg;
+  stay: { area: string; perNightUSD: number; picks: { name: string; why: string }[] };
+  food: { name: string; where: string; approxUSD: number }[];
+  days: { day: number; title: string; items: string[] }[];
+  budgetUSD: { travel: number; stay: number; food: number; local: number; activities: number; buffer: number };
+  typicalTotalUSD: number; packing: string[]; goodToKnow: string[];
+}
+export interface PlanInput {
+  purpose: Purpose;
+  destination: { name: string; country: string; countryCode: string; lat: number; lon: number };
+  origin: { name: string; lat: number; lon: number };
+  startDate: string; endDate: string; travellers: number; budgetUSD: number; notes: string;
+}
+export interface SavedPlan {
+  _id: string; status: 'upcoming' | 'completed'; purpose: Purpose;
+  destination: PlanInput['destination']; origin: PlanInput['origin'];
+  startDate: string; endDate: string; travellers: number; currency: string;
+  plan: TripPlan; plannedTotalUSD: number; typicalTotalUSD: number;
+  actualSpentUSD: number | null; savedUSD: number | null; distanceKm: number; createdAt: string;
+}
+export const planTotal = (p: TripPlan) => Object.values(p.budgetUSD).reduce((a, b) => a + b, 0);

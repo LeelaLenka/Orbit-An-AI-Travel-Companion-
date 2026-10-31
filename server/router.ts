@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
-import { budgetInput, planBudget, scanDestination, scanInput, usage } from './ai.js';
+import { askBine, budgetInput, chatInput, draftPlan, planBudget, planInput, scanDestination, scanInput, usage } from './ai.js';
 import { endSession, ensureDemoUser, login, loginSchema, register, registerSchema, requireUser, startSession, toPublic } from './auth.js';
 import { DEMO } from './env.js';
-import { getPlaceInfo, getRates, getSatelliteImage, getWeather, searchPlaces } from './external.js';
+import { getFeatured, getHotels, getPlaceInfo, getRates, getRoute, getSatelliteImage, getWeather, searchPlaces } from './external.js';
+import { haversineKm } from './geo.js';
 import { clientIp, HttpError, readJson, sendJson, type Req, type Res } from './http.js';
 import { store, usingMemoryStore } from './store.js';
 
@@ -63,16 +64,14 @@ export async function handle(req: Req, res: Res): Promise<void> {
       return sendJson(res, 200, { email: DEMO.email, password: DEMO.password });
     }
 
-    // ---------- signed in ----------
-    const user = await requireUser(req);
+    // ---------- public browsing (rate-limited per visitor) ----------
+    const isPublicData = ['places', 'place-info', 'weather', 'rates', 'route', 'featured'].includes(route) && method === 'GET';
+    if (isPublicData) await throttle(req, 'pub', 400);
 
-    if (route === 'auth/me' && method === 'GET') return sendJson(res, 200, { user: toPublic(user), usage: await usage(user) });
-    if (route === 'me/currency' && method === 'PUT') {
-      const { currency } = currencyInput.parse(await readJson(req));
-      await store.updateUserCurrency(user._id, currency);
-      return sendJson(res, 200, { ok: true });
+    if (route === 'featured' && method === 'GET') {
+      res.setHeader('Cache-Control', 'public, max-age=600, s-maxage=86400');
+      return sendJson(res, 200, { places: await getFeatured() });
     }
-
     if (route === 'places' && method === 'GET') {
       const term = q('q').trim();
       if (term.length < 2) return sendJson(res, 200, { places: [] });
@@ -89,6 +88,22 @@ export async function handle(req: Req, res: Res): Promise<void> {
       return sendJson(res, 200, { info: await getPlaceInfo(lat, lon, name, cc) });
     }
     if (route === 'rates' && method === 'GET') return sendJson(res, 200, await getRates());
+    if (route === 'route' && method === 'GET') {
+      const from = coords.parse({ lat: q('fromLat'), lon: q('fromLon') });
+      const to = coords.parse({ lat: q('toLat'), lon: q('toLon') });
+      return sendJson(res, 200, { route: await getRoute(from.lat, from.lon, to.lat, to.lon) });
+    }
+
+
+    // ---------- signed in ----------
+    const user = await requireUser(req);
+
+    if (route === 'auth/me' && method === 'GET') return sendJson(res, 200, { user: toPublic(user), usage: await usage(user) });
+    if (route === 'me/currency' && method === 'PUT') {
+      const { currency } = currencyInput.parse(await readJson(req));
+      await store.updateUserCurrency(user._id, currency);
+      return sendJson(res, 200, { ok: true });
+    }
 
     if (route === 'ai/scan' && method === 'POST') {
       const result = await scanDestination(user, scanInput.parse(await readJson(req)));
@@ -97,6 +112,56 @@ export async function handle(req: Req, res: Res): Promise<void> {
     if (route === 'ai/budget' && method === 'POST') {
       const result = await planBudget(user, budgetInput.parse(await readJson(req)));
       return sendJson(res, 200, { ...result, usage: await usage(user) });
+    }
+
+    if (route === 'assistant' && method === 'POST') {
+      const r = await askBine(user, chatInput.parse(await readJson(req)));
+      return sendJson(res, 200, { ...r, usage: await usage(user) });
+    }
+
+    // Trip plans: draft (not saved) -> accept (saved as upcoming) -> complete (savings recorded)
+    if (route === 'plans/draft' && method === 'POST') {
+      const input = planInput.parse(await readJson(req));
+      const [routeInfo, hotels] = await Promise.all([
+        getRoute(input.origin.lat, input.origin.lon, input.destination.lat, input.destination.lon),
+        getHotels(input.destination.lat, input.destination.lon),
+      ]);
+      const routeText = routeInfo.modes.filter((m) => m.available).map((m) => `${m.mode} ${m.distanceKm} km ~${Math.round(m.minutes / 6) / 10} h (${m.source})`).join('; ') || `straight-line ${routeInfo.straightKm} km`;
+      const hotelText = hotels.map((h) => `${h.name} (${h.kind}${h.stars ? `, ${h.stars}-star` : ''}, ${h.distanceKm} km from centre)`).join('; ');
+      const { plan, sample } = await draftPlan(user, input, { route: routeText, hotels: hotelText });
+      return sendJson(res, 200, { plan, sample, route: routeInfo, hotels, usage: await usage(user) });
+    }
+    if (route === 'plans' && method === 'GET') return sendJson(res, 200, { plans: (await store.listPlans(user._id)).map(({ userId: _u, ...p }) => p) });
+    if (route === 'plans' && method === 'POST') {
+      const body = (await readJson(req)) as Record<string, unknown>;
+      const input = planInput.parse(body.input);
+      const totals = z.object({ plannedTotalUSD: z.number().nonnegative().max(10_000_000), typicalTotalUSD: z.number().nonnegative().max(10_000_000) }).parse(body);
+      const currency = z.string().regex(/^[A-Z]{3}$/).catch('USD').parse(body.currency);
+      if ((await store.listPlans(user._id)).length >= 100) throw new HttpError(400, 'You can keep up to 100 trips.');
+      const doc = {
+        _id: randomUUID(), userId: user._id, status: 'upcoming' as const, purpose: input.purpose, destination: input.destination,
+        origin: input.origin, startDate: input.startDate, endDate: input.endDate, travellers: input.travellers, currency,
+        plan: body.plan, plannedTotalUSD: totals.plannedTotalUSD, typicalTotalUSD: totals.typicalTotalUSD,
+        actualSpentUSD: null, savedUSD: null,
+        distanceKm: Math.round(haversineKm(input.origin.lat, input.origin.lon, input.destination.lat, input.destination.lon)),
+        createdAt: new Date(), completedAt: null,
+      };
+      await store.insertPlan(doc);
+      const { userId: _u, ...pub } = doc;
+      return sendJson(res, 201, { plan: pub });
+    }
+    const planId = /^plans\/([0-9a-f-]{36})(\/complete)?$/.exec(route);
+    if (planId && planId[2] && method === 'POST') {
+      const { actualSpentUSD } = z.object({ actualSpentUSD: z.number().nonnegative().max(10_000_000) }).parse(await readJson(req));
+      const p = await store.getPlan(user._id, planId[1]!);
+      if (!p) throw new HttpError(404, 'Trip not found.');
+      const saved = Math.round((p.typicalTotalUSD - actualSpentUSD) * 100) / 100;
+      if (!(await store.completePlan(user._id, p._id, actualSpentUSD, saved))) throw new HttpError(409, 'This trip is already marked complete.');
+      return sendJson(res, 200, { savedUSD: saved });
+    }
+    if (planId && !planId[2] && method === 'DELETE') {
+      if (!(await store.deletePlan(user._id, planId[1]!))) throw new HttpError(404, 'Trip not found.');
+      return sendJson(res, 200, { ok: true });
     }
 
     if (route === 'trips' && method === 'GET') return sendJson(res, 200, { trips: (await store.listTrips(user._id)).map(({ userId: _u, ...t }) => t) });

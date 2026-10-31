@@ -1,6 +1,7 @@
 import { env } from './env.js';
 import { HttpError } from './http.js';
 import { store } from './store.js';
+import { haversineKm, parseCoordinates } from './geo.js';
 import * as mock from './mock-data.js';
 
 /** Live data from free, keyless public services */
@@ -34,6 +35,8 @@ const UA = 'OrbitTravel/1.0 (https://orbit-an-ai-travel-companion.vercel.app)';
  * Falls back to Open-Meteo's city search if Photon is unavailable.
  */
 export async function searchPlaces(q: string): Promise<Place[]> {
+  const coords = parseCoordinates(q);
+  if (coords) return [await reversePlace(coords.lat, coords.lon)];
   if (env.mockExternal) return mock.places.filter((p) => (p.name + ' ' + p.detail).toLowerCase().includes(q.toLowerCase().slice(0, 4)));
   const key = `places:${q.toLowerCase()}`;
   const cached = await store.cacheGet<Place[]>(key);
@@ -82,6 +85,23 @@ async function photon(q: string): Promise<Place[]> {
   return out;
 }
 
+/** Names an exact coordinate (Photon reverse geocoding); the pin stays exactly where the user asked */
+export async function reversePlace(lat: number, lon: number): Promise<Place> {
+  const label = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const base: Place = { id: `pt${label}`, name: label, detail: 'Exact coordinates', kind: 'point', precise: true, admin: '', country: '', countryCode: '', lat, lon };
+  if (env.mockExternal) return { ...base, detail: 'Near Fort Road, Vizianagaram, Andhra Pradesh, India', admin: 'Andhra Pradesh', country: 'India', countryCode: 'IN' };
+  try {
+    const r = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': UA } });
+    const d = (await r.json()) as { features?: { properties: Record<string, string | undefined> }[] };
+    const p = d.features?.[0]?.properties;
+    if (!p) return base;
+    const near = [p.name, [p.housenumber, p.street].filter(Boolean).join(' '), p.district, p.city, p.state, p.country].filter((x, i, a) => x && a.indexOf(x) === i).join(', ');
+    return { ...base, detail: near ? `Near ${near}` : base.detail, admin: p.state ?? '', country: p.country ?? '', countryCode: (p.countrycode ?? '').toUpperCase() };
+  } catch {
+    return base;
+  }
+}
+
 async function openMeteoPlaces(q: string): Promise<Place[]> {
   type R = { results?: { id: number; name: string; admin1?: string; country?: string; country_code?: string; latitude: number; longitude: number }[] };
   const data = await fetchJson<R>(
@@ -107,12 +127,7 @@ export interface PlaceInfo {
   attractions: Attraction[];
 }
 
-function distanceKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
-  const R = 6371, r = Math.PI / 180;
-  const dLat = (bLat - aLat) * r, dLon = (bLon - aLon) * r;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
+const distanceKm = haversineKm;
 
 /** Articles that are places on a map but not things a visitor goes to see */
 const NOT_ATTRACTION = /\b(constituency|mandal|tehsil|taluk|village|census town|neighbourhood|neighborhood|suburb|ward|school|college|university|railway station|metro station|bus station|bus stop|hospital|company|district of|municipality|panchayat|electoral|road in|highway|street in|apartment|residential)\b/i;
@@ -262,4 +277,130 @@ export async function getSatelliteImage(): Promise<{ bytes: Buffer; date: string
   const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!r.ok || !(r.headers.get('content-type') ?? '').includes('image')) throw new HttpError(502, 'NASA imagery is unavailable right now.');
   return { bytes: Buffer.from(await r.arrayBuffer()), date, type: 'image/jpeg' };
+}
+
+// ---------------- Getting there ----------------
+export type Mode = 'walk' | 'bike' | 'car' | 'flight' | 'ship';
+export interface ModeEstimate { mode: Mode; available: boolean; distanceKm: number; minutes: number; source: 'road network' | 'estimate'; note: string }
+export interface RouteResult { straightKm: number; modes: ModeEstimate[]; recommended: Mode }
+
+/** Road route from OSRM (OpenStreetMap routing, FOSSGIS servers); null when no road connects the points */
+async function osrm(profile: 'foot' | 'bike' | 'car', a: [number, number], b: [number, number]): Promise<{ km: number; min: number } | null> {
+  const url = `https://routing.openstreetmap.de/routed-${profile}/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=false&alternatives=false`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(9000), headers: { 'User-Agent': UA } });
+    const d = (await r.json()) as { code?: string; routes?: { distance: number; duration: number }[] };
+    const route = d.code === 'Ok' ? d.routes?.[0] : undefined;
+    return route ? { km: route.distance / 1000, min: route.duration / 60 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Distance and time by every mode. Walk/bike/car use real road routes; flight and ship are estimates
+ * from the great-circle distance (cruise speed plus typical airport/port time).
+ */
+export async function getRoute(fromLat: number, fromLon: number, toLat: number, toLon: number): Promise<RouteResult> {
+  const straight = haversineKm(fromLat, fromLon, toLat, toLon);
+  const key = `route:v1:${fromLat.toFixed(4)},${fromLon.toFixed(4)}>${toLat.toFixed(4)},${toLon.toFixed(4)}`;
+  const cached = env.mockExternal ? null : await store.cacheGet<RouteResult>(key);
+  if (cached) return cached;
+  const a: [number, number] = [fromLat, fromLon];
+  const b: [number, number] = [toLat, toLon];
+
+  // Only ask the road router for modes that make sense at this distance
+  const [walk, bike, car] = env.mockExternal
+    ? [straight < 40 ? { km: straight * 1.3, min: straight * 1.3 * 12 } : null, straight < 250 ? { km: straight * 1.25, min: straight * 1.25 * 4 } : null, straight < 2500 ? { km: straight * 1.3, min: straight * 1.3 * 1.25 } : null]
+    : await Promise.all([
+        straight < 40 ? osrm('foot', a, b) : Promise.resolve(null),
+        straight < 250 ? osrm('bike', a, b) : Promise.resolve(null),
+        straight < 3500 ? osrm('car', a, b) : Promise.resolve(null),
+      ]);
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const modes: ModeEstimate[] = [
+    walk && walk.km <= 40
+      ? { mode: 'walk', available: true, distanceKm: r1(walk.km), minutes: Math.round(walk.min), source: 'road network', note: walk.km > 15 ? 'Long walk; plan rest stops' : 'Footpaths and roads' }
+      : { mode: 'walk', available: false, distanceKm: r1(straight), minutes: 0, source: 'estimate', note: 'Too far to walk' },
+    bike && bike.km <= 250
+      ? { mode: 'bike', available: true, distanceKm: r1(bike.km), minutes: Math.round(bike.min), source: 'road network', note: 'Cycling route' }
+      : { mode: 'bike', available: false, distanceKm: r1(straight), minutes: 0, source: 'estimate', note: 'Too far to cycle' },
+    car
+      ? { mode: 'car', available: true, distanceKm: r1(car.km), minutes: Math.round(car.min), source: 'road network', note: 'Fastest road route, without traffic' }
+      : { mode: 'car', available: false, distanceKm: r1(straight), minutes: 0, source: 'estimate', note: straight >= 3500 ? 'Too far to drive' : 'No road connects these places' },
+    straight >= 150
+      ? { mode: 'flight', available: true, distanceKm: r1(straight), minutes: Math.round((straight / 800) * 60 + 120), source: 'estimate', note: 'Flying time at ~800 km/h plus about 2 h at airports; connections add more' }
+      : { mode: 'flight', available: false, distanceKm: r1(straight), minutes: 0, source: 'estimate', note: 'Too close to fly' },
+    !car && straight >= 20 && straight < 6000
+      ? { mode: 'ship', available: true, distanceKm: r1(straight * 1.2), minutes: Math.round(((straight * 1.2) / 35) * 60 + 60), source: 'estimate', note: 'Ferry or ship at ~35 km/h, where a service exists' }
+      : { mode: 'ship', available: false, distanceKm: r1(straight), minutes: 0, source: 'estimate', note: car ? 'Not needed: a road connects these places' : 'No sea route estimate' },
+  ];
+  const ok = (m: Mode) => modes.find((x) => x.mode === m)?.available;
+  const recommended: Mode =
+    straight <= 2 && ok('walk') ? 'walk' :
+    straight <= 8 && ok('bike') ? 'bike' :
+    ok('car') && (car!.min <= 8 * 60 || !ok('flight')) ? 'car' :
+    ok('flight') ? 'flight' : ok('ship') ? 'ship' : 'car';
+  const result = { straightKm: r1(straight), modes, recommended };
+  if (!env.mockExternal) await store.cacheSet(key, result, 7 * 86_400);
+  return result;
+}
+
+// ---------------- Real hotels (OpenStreetMap via Overpass) ----------------
+export interface Hotel { name: string; kind: string; stars: string; distanceKm: number; lat: number; lon: number; website: string }
+
+export async function getHotels(lat: number, lon: number): Promise<Hotel[]> {
+  if (env.mockExternal) return [
+    { name: 'Hotel Sample Residency', kind: 'hotel', stars: '3', distanceKm: 0.8, lat: lat + 0.005, lon: lon + 0.004, website: '' },
+    { name: 'Riverside Guest House (sample)', kind: 'guest house', stars: '', distanceKm: 1.6, lat: lat - 0.01, lon: lon + 0.006, website: '' },
+  ];
+  const key = `hotels:${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const cached = await store.cacheGet<Hotel[]>(key);
+  if (cached) return cached;
+  const q = `[out:json][timeout:12];nwr["tourism"~"^(hotel|guest_house|hostel|motel)$"]["name"](around:6000,${lat},${lon});out center 60;`;
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: new URLSearchParams({ data: q }), signal: AbortSignal.timeout(13_000), headers: { 'User-Agent': UA },
+    });
+    const d = (await r.json()) as { elements?: { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[] };
+    const hotels = (d.elements ?? []).map((e) => {
+      const p = e.center ?? { lat: e.lat ?? lat, lon: e.lon ?? lon };
+      const t = e.tags ?? {};
+      return { name: t['name:en'] || t.name || '', kind: (t.tourism ?? 'hotel').replace('_', ' '), stars: t.stars ?? '', distanceKm: Math.round(haversineKm(lat, lon, p.lat, p.lon) * 10) / 10, lat: p.lat, lon: p.lon, website: t.website ?? t['contact:website'] ?? '' };
+    }).filter((h) => h.name).sort((a, b) => (Number(b.stars) || 0) - (Number(a.stars) || 0) || a.distanceKm - b.distanceKm).slice(0, 10);
+    await store.cacheSet(key, hotels, 14 * 86_400);
+    return hotels;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------- Featured destinations (home page cards with real photos) ----------------
+const FEATURED = [
+  { name: 'Varanasi', country: 'India', cc: 'IN', lat: 25.3176, lon: 82.9739, tag: 'Pilgrimage', wiki: 'Varanasi' },
+  { name: 'Munnar', country: 'India', cc: 'IN', lat: 10.0889, lon: 77.0595, tag: 'Vacation', wiki: 'Munnar' },
+  { name: 'Hampi', country: 'India', cc: 'IN', lat: 15.335, lon: 76.46, tag: 'Heritage', wiki: 'Hampi' },
+  { name: 'Tirumala', country: 'India', cc: 'IN', lat: 13.6833, lon: 79.3474, tag: 'Pilgrimage', wiki: 'Tirumala_Venkateswara_Temple' },
+  { name: 'Araku Valley', country: 'India', cc: 'IN', lat: 18.3273, lon: 82.8775, tag: 'Nature', wiki: 'Araku_Valley' },
+  { name: 'Leh', country: 'India', cc: 'IN', lat: 34.1526, lon: 77.5771, tag: 'Adventure', wiki: 'Leh' },
+  { name: 'Kyoto', country: 'Japan', cc: 'JP', lat: 35.0116, lon: 135.7681, tag: 'Culture', wiki: 'Kyoto' },
+  { name: 'Lisbon', country: 'Portugal', cc: 'PT', lat: 38.7223, lon: -9.1393, tag: 'Vacation', wiki: 'Lisbon' },
+];
+export interface Featured { name: string; country: string; cc: string; lat: number; lon: number; tag: string; image: string | null; blurb: string }
+
+export async function getFeatured(): Promise<Featured[]> {
+  if (env.mockExternal) return FEATURED.map(({ wiki: _w, ...f }) => ({ ...f, image: null, blurb: 'Sample description' }));
+  const cached = await store.cacheGet<Featured[]>('featured:v1');
+  if (cached) return cached;
+  const out = await Promise.all(FEATURED.map(async ({ wiki, ...f }) => {
+    try {
+      const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${wiki}`, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': UA } });
+      const d = (await r.json()) as { thumbnail?: { source: string }; originalimage?: { source: string }; description?: string };
+      return { ...f, image: d.thumbnail?.source?.replace(/\/\d+px-/, '/640px-') ?? null, blurb: d.description ?? '' };
+    } catch {
+      return { ...f, image: null, blurb: '' };
+    }
+  }));
+  await store.cacheSet('featured:v1', out, 7 * 86_400);
+  return out;
 }

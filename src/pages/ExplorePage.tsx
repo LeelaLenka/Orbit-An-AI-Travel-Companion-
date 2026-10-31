@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { api, type Place, type PlaceInfo, type Trip } from '../lib/api';
 import type { Marker } from '../components/GlobeView';
 import { FamousPlaces } from '../components/FamousPlaces';
+import { GettingThere } from '../components/GettingThere';
+import { HomeOverlay } from '../components/HomeOverlay';
+import { useSession } from '../lib/session';
 import { PlaceOverview } from '../components/PlaceOverview';
 import { PlaceSearch } from '../components/PlaceSearch';
 import { ScanPanel } from '../components/ScanPanel';
@@ -13,10 +16,12 @@ const GlobeView = lazy(() => import('../components/GlobeView').then((m) => ({ de
 const MapView = lazy(() => import('../components/MapView').then((m) => ({ default: m.MapView })));
 
 type Selected = Pick<Place, 'name' | 'detail' | 'admin' | 'country' | 'countryCode' | 'lat' | 'lon' | 'precise'>;
-type Tab = 'overview' | 'places' | 'weather' | 'scan';
+type Tab = 'overview' | 'places' | 'travel' | 'weather' | 'scan';
 
 export function ExplorePage() {
   const [params, setParams] = useSearchParams();
+  const { user, requireLogin } = useSession();
+  const [path, setPath] = useState<{ lat: number; lon: number }[] | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [tab, setTab] = useState<Tab>('overview');
@@ -29,8 +34,9 @@ export function ExplorePage() {
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
-    api<{ trips: Trip[] }>('trips').then((r) => setTrips(r.trips)).catch(() => {});
-  }, []);
+    if (user) api<{ trips: Trip[] }>('trips').then((r) => setTrips(r.trips)).catch(() => {});
+    else setTrips([]);
+  }, [user]);
 
   /** Shows a place: exact addresses and landmarks open the street map, cities fly the globe */
   const open = useCallback((p: Selected, initialTab: Tab = 'overview') => {
@@ -40,6 +46,7 @@ export function ExplorePage() {
     setView(p.precise ? 'map' : 'globe');
     setMapFocus({ lat: p.lat, lon: p.lon, zoom: p.precise ? 17 : 13 });
     setInfo(null);
+    setPath(null);
     setInfoLoading(true);
     const qs = new URLSearchParams({ lat: String(p.lat), lon: String(p.lon), name: p.name, cc: p.countryCode });
     api<{ info: PlaceInfo }>(`place-info?${qs}`)
@@ -74,6 +81,7 @@ export function ExplorePage() {
 
   async function save() {
     if (!selected) return;
+    if (!requireLogin('Create a free account to save places and see them on your globe.', () => void save())) return;
     setSaving(true);
     try {
       const r = await api<{ trip: Trip }>('trips', { method: 'POST', body: { name: selected.name, country: selected.country, countryCode: selected.countryCode, lat: selected.lat, lon: selected.lon, note: selected.detail } });
@@ -100,13 +108,15 @@ export function ExplorePage() {
       <Suspense fallback={<div className="globe globe--fallback"><p className="muted">Loading…</p></div>}>
         {view === 'globe'
           ? <GlobeView markers={markers} focus={globeFocus} onImageryDate={setImageryDate} />
-          : <MapView markers={markers} focus={mapFocus} zoom={mapFocus?.zoom ?? 13} onMarkerClick={onMarkerClick} />}
+          : <MapView markers={markers} focus={mapFocus} zoom={mapFocus?.zoom ?? 13} onMarkerClick={onMarkerClick} path={path ?? undefined} />}
       </Suspense>
 
       <div className="explore__search">
         <PlaceSearch onPick={pick} />
-        {!selected && <p className="hint">Search an exact address, a landmark or any town on Earth.</p>}
+        {!selected && <p className="hint">Search an address, a landmark, any town, or coordinates like 18.1135, 83.4019</p>}
       </div>
+
+      {!selected && <HomeOverlay onOpen={(p) => open({ ...p, detail: '', admin: '', precise: false })} />}
 
       <div className="seg seg--view" role="group" aria-label="View">
         <button aria-pressed={view === 'globe'} onClick={() => setView('globe')}>Globe</button>
@@ -115,6 +125,7 @@ export function ExplorePage() {
 
       {selected && (
         <aside className="place panel" aria-label={`${selected.name} details`}>
+          {info?.about?.image && <div className="place__banner" style={{ backgroundImage: `url(${info.about.image})` }} aria-hidden="true" />}
           <header className="place__head">
             <div>
               <p className="eyebrow">{[selected.admin, selected.country].filter(Boolean).join(' · ')}</p>
@@ -130,15 +141,18 @@ export function ExplorePage() {
                href={`https://www.google.com/maps/dir/?api=1&destination=${selected.lat},${selected.lon}`}>Directions</a>
             {notice && <span className="small muted" role="status">{notice}</span>}
           </div>
-          <div className="tabs tabs--4" role="tablist">
+          <div className="tabs tabs--5" role="tablist">
             <button role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}>Overview</button>
             <button role="tab" aria-selected={tab === 'places'} onClick={() => setTab('places')}>Places{info?.attractions.length ? <span className="count">{info.attractions.length}</span> : null}</button>
+            <button role="tab" aria-selected={tab === 'travel'} onClick={() => setTab('travel')}>Travel</button>
             <button role="tab" aria-selected={tab === 'weather'} onClick={() => setTab('weather')}>Weather</button>
-            <button role="tab" aria-selected={tab === 'scan'} onClick={() => setTab('scan')}>AI scan</button>
+            <button role="tab" aria-selected={tab === 'scan'} onClick={() => setTab('scan')}>AI</button>
           </div>
           <div className="place__body">
             {tab === 'overview' && <PlaceOverview info={info} loading={infoLoading} onShowAll={() => setTab('places')} onPick={showAttraction} />}
-            {tab === 'places' && <FamousPlaces items={info?.attractions ?? []} loading={infoLoading} onPick={showAttraction} />}
+            {tab === 'places' && <FamousPlaces items={info?.attractions ?? []} loading={infoLoading} start={selected} onPick={showAttraction}
+              onRoute={(p) => { setPath(p); if (p) setView('map'); }} />}
+            {tab === 'travel' && <GettingThere to={selected} />}
             {tab === 'weather' && <WeatherCard lat={selected.lat} lon={selected.lon} />}
             {tab === 'scan' && <ScanPanel place={selected} />}
           </div>

@@ -4,10 +4,11 @@ import 'leaflet/dist/leaflet.css';
 import type { Marker } from './GlobeView';
 
 const LAYERS = {
+  // OpenStreetMap's own tiles: no key needed; darkened with a CSS filter to match the app
   map: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
   },
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -19,8 +20,10 @@ const LAYERS = {
 const COLORS = { selected: '#ffb547', saved: '#a78bfa', suggestion: '#2dd4bf' };
 
 /** Street-level map (OpenStreetMap or satellite photos) for exact addresses and nearby places */
-export function MapView({ markers, focus, zoom, onMarkerClick }: {
+export function MapView({ markers, focus, zoom, onMarkerClick, path }: {
   markers: Marker[];
+  /** A route to draw, in visiting order */
+  path?: { lat: number; lon: number }[];
   focus: { lat: number; lon: number } | null;
   zoom: number;
   onMarkerClick?: (m: Marker) => void;
@@ -52,7 +55,7 @@ export function MapView({ markers, focus, zoom, onMarkerClick }: {
     if (!m) return;
     tiles.current?.remove();
     const cfg = LAYERS[style];
-    tiles.current = L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom, subdomains: 'abcd' }).addTo(m);
+    tiles.current = L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom, className: `tiles tiles--${style}` }).addTo(m);
   }, [style]);
 
   useEffect(() => {
@@ -70,6 +73,16 @@ export function MapView({ markers, focus, zoom, onMarkerClick }: {
       if (sel) L.circleMarker([mk.lat, mk.lon], { radius: 22, color: COLORS.selected, weight: 2, fill: false, opacity: 0.6, interactive: false }).addTo(g);
     }
   }, [markers, onMarkerClick]);
+
+  const line = useRef<L.Polyline | null>(null);
+  useEffect(() => {
+    line.current?.remove();
+    line.current = null;
+    if (map.current && path && path.length > 1) {
+      line.current = L.polyline(path.map((p) => [p.lat, p.lon] as [number, number]), { color: '#2dd4bf', weight: 4, opacity: 0.9, dashArray: '8 8' }).addTo(map.current);
+      map.current.fitBounds(line.current.getBounds(), { padding: [60, 60], maxZoom: 16 });
+    }
+  }, [path]);
 
   useEffect(() => {
     if (focus) map.current?.flyTo([focus.lat, focus.lon], zoom, { duration: 1.2 });

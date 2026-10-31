@@ -28,7 +28,7 @@ async function spendOne(u: UserDoc): Promise<void> {
   }
 }
 
-async function generate(prompt: string, schema: object): Promise<unknown> {
+async function generate(prompt: string, schema: object, temperature = 0.4): Promise<unknown> {
   if (!ai) throw new Error('no-ai');
   let text: string | undefined;
   try {
@@ -38,7 +38,7 @@ async function generate(prompt: string, schema: object): Promise<unknown> {
       config: {
         responseMimeType: 'application/json',
         responseJsonSchema: schema,
-        temperature: 0.4, // steadier, more factual answers
+        temperature, // low = steadier, more factual answers
         systemInstruction:
           'You are Orbit, a careful travel researcher. Give realistic, current-as-possible information. ' +
           'Costs are typical estimates in US dollars for one traveller; never invent brand names, prices from specific websites, or offers. ' +
@@ -190,4 +190,107 @@ export async function planBudget(u: UserDoc, input: z.infer<typeof budgetInput>)
   if (!parsed.success) throw new HttpError(502, 'The AI answer was incomplete. Try again.');
   await store.cacheSet(key, parsed.data, 3 * 86_400);
   return { plan: parsed.data, cached: false, sample: false };
+}
+
+// ---------------- Trip planner ----------------
+export const PURPOSES = ['Pilgrimage', 'Vacation', 'Work', 'Family', 'Adventure', 'Other'] as const;
+
+const tripPlanSchema = z.object({
+  summary: z.string().max(500),
+  getThere: z.object({ mode: z.string().max(30), route: z.string().max(240), costUSD: money, duration: z.string().max(60), tip: z.string().max(200) }),
+  getBack: z.object({ mode: z.string().max(30), route: z.string().max(240), costUSD: money, duration: z.string().max(60), tip: z.string().max(200) }),
+  stay: z.object({ area: z.string().max(160), perNightUSD: money, picks: z.array(z.object({ name: z.string().max(100), why: z.string().max(160) })).max(4) }),
+  food: z.array(z.object({ name: z.string().max(60), where: z.string().max(120), approxUSD: money })).max(6),
+  days: z.array(z.object({ day: z.number().int().min(1).max(60), title: z.string().max(80), items: z.array(z.string().max(200)).max(6) })).max(30),
+  budgetUSD: z.object({ travel: money, stay: money, food: money, local: money, activities: money, buffer: money }),
+  typicalTotalUSD: money,
+  packing: z.array(z.string().max(120)).max(8),
+  goodToKnow: z.array(z.string().max(200)).max(6),
+});
+export type TripPlan = z.infer<typeof tripPlanSchema>;
+
+const leg = { type: 'object', properties: { mode: str, route: str, costUSD: num, duration: str, tip: str }, required: ['mode', 'route', 'costUSD', 'duration', 'tip'] };
+const tripPlanJsonSchema = {
+  type: 'object',
+  properties: {
+    summary: str,
+    getThere: leg,
+    getBack: leg,
+    stay: { type: 'object', properties: { area: str, perNightUSD: num, picks: { type: 'array', items: { type: 'object', properties: { name: str, why: str }, required: ['name', 'why'] } } }, required: ['area', 'perNightUSD', 'picks'] },
+    food: { type: 'array', items: { type: 'object', properties: { name: str, where: str, approxUSD: num }, required: ['name', 'where', 'approxUSD'] } },
+    days: { type: 'array', items: { type: 'object', properties: { day: { type: 'integer' }, title: str, items: { type: 'array', items: str } }, required: ['day', 'title', 'items'] } },
+    budgetUSD: { type: 'object', description: 'Total for the whole group and trip', properties: { travel: num, stay: num, food: num, local: num, activities: num, buffer: num }, required: ['travel', 'stay', 'food', 'local', 'activities', 'buffer'] },
+    typicalTotalUSD: { ...num, description: 'What a typical unplanned group spends on the same trip (booking late, tourist prices)' },
+    packing: { type: 'array', items: str },
+    goodToKnow: { type: 'array', items: str },
+  },
+  required: ['summary', 'getThere', 'getBack', 'stay', 'food', 'days', 'budgetUSD', 'typicalTotalUSD', 'packing', 'goodToKnow'],
+};
+
+export const planInput = z.object({
+  purpose: z.enum(PURPOSES),
+  destination: z.object({ name: z.string().trim().min(1).max(80), country: z.string().trim().max(80).default(''), countryCode: z.string().trim().max(3).default(''), lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }),
+  origin: z.object({ name: z.string().trim().min(1).max(120), lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  travellers: z.number().int().min(1).max(12),
+  budgetUSD: z.number().nonnegative().max(10_000_000).default(0),
+  notes: z.string().trim().max(200).default(''),
+});
+
+export async function draftPlan(u: UserDoc, input: z.infer<typeof planInput>, context: { route: string; hotels: string }): Promise<{ plan: TripPlan; sample: boolean }> {
+  const days = Math.round((Date.parse(input.endDate) - Date.parse(input.startDate)) / 86_400_000) + 1;
+  if (!(days >= 1 && days <= 30)) throw new HttpError(400, 'Trips can be 1 to 30 days; check the dates.');
+  if (!ai) return { plan: tripPlanSchema.parse(mock.tripPlan(input.destination.name, days)), sample: true };
+  await spendOne(u);
+  const raw = await generate(
+    `Plan a ${input.purpose.toLowerCase()} trip for ${input.travellers} traveller(s) from ${input.origin.name} to ${input.destination.name}, ${input.destination.country}, ` +
+      `${input.startDate} to ${input.endDate} (${days} days).` +
+      (input.budgetUSD > 0 ? ` Their total budget is about ${Math.round(input.budgetUSD)} USD; keep the plan within it if realistic, and say so in the summary if not.` : '') +
+      (input.notes ? ` Notes from the traveller: ${input.notes}.` : '') +
+      `\nMeasured travel options between origin and destination: ${context.route}.` +
+      `\nReal places to stay near the destination (from OpenStreetMap): ${context.hotels || 'none found; recommend an area instead'}. ` +
+      'For "stay.picks", ONLY choose from this list of real places, never invent hotel names. ' +
+      (input.purpose === 'Pilgrimage' ? 'Include darshan/visiting timings advice, dress codes and queue tips in goodToKnow. ' : '') +
+      (input.purpose === 'Work' ? 'Keep evenings free and suggest stays close to business districts. ' : '') +
+      `Give one "days" entry per day (${days} days), costs for the whole group in USD, and a realistic typicalTotalUSD for an unplanned trip.`,
+    tripPlanJsonSchema, 0.5);
+  const parsed = tripPlanSchema.safeParse(raw);
+  if (!parsed.success) throw new HttpError(502, 'The AI plan was incomplete. Try again.');
+  return { plan: parsed.data, sample: false };
+}
+
+// ---------------- Bine: multilingual travel assistant ----------------
+export const chatInput = z.object({
+  messages: z.array(z.object({ role: z.enum(['user', 'model']), text: z.string().trim().min(1).max(1200) })).min(1).max(16),
+  language: z.string().trim().max(40).default('English'),
+  place: z.string().trim().max(160).default(''),
+});
+
+export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>): Promise<{ reply: string; sample: boolean }> {
+  if (!ai) return { reply: `(Sample) I am Bine. Add a Gemini key and I will answer in ${input.language}.`, sample: true };
+  await spendOne(u);
+  try {
+    const r = await ai.models.generateContent({
+      model: env.geminiModel,
+      contents: input.messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
+      config: {
+        temperature: 0.6,
+        maxOutputTokens: 400,
+        systemInstruction:
+          `You are Bine, the friendly travel assistant inside the Orbit app. Reply in the same language the user writes in; if unsure, use ${input.language}. ` +
+          'Your reply will be read aloud, so use short plain sentences, no markdown, no lists longer than 4 items, at most about 110 words. ' +
+          'Help with places, routes, budgets, culture, safety, weather and trip planning. Prices are estimates; say so. ' +
+          (input.place ? `The user is currently looking at: ${input.place}.` : ''),
+      },
+    });
+    const text = (r.text ?? '').trim();
+    if (!text) throw new Error('empty');
+    return { reply: text.slice(0, 1500), sample: false };
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    const msg = String((e as Error).message ?? e);
+    if (/429|quota|RESOURCE_EXHAUSTED/i.test(msg)) throw new HttpError(503, 'Bine is busy right now (free quota reached). Try again in a minute.');
+    throw new HttpError(502, 'Bine couldn’t answer. Try again.');
+  }
 }

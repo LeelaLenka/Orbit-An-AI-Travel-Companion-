@@ -79,3 +79,16 @@ export const budget = (amountUsd: number) => ({
     ],
   })),
 });
+
+export const tripPlan = (dest: string, days: number) => ({
+  summary: `Sample plan for ${dest}. Add a GEMINI_API_KEY for a real AI plan.`,
+  getThere: { mode: 'Train', route: 'Sample: overnight express to the nearest station', costUSD: 18, duration: '9 h', tip: 'Book 2–3 weeks ahead (sample)' },
+  getBack: { mode: 'Bus', route: 'Sample: state transport sleeper bus', costUSD: 14, duration: '10 h', tip: 'Leave early to avoid traffic (sample)' },
+  stay: { area: 'Near the old town (sample)', perNightUSD: 30, picks: [{ name: 'Hotel Sample Residency', why: 'Well rated and central (sample)' }] },
+  food: [{ name: 'Local thali', where: 'Family restaurants near the market', approxUSD: 3 }],
+  days: Array.from({ length: days }, (_, i) => ({ day: i + 1, title: `Day ${i + 1} (sample)`, items: ['Morning visit', 'Lunch locally', 'Evening walk'] })),
+  budgetUSD: { travel: 32, stay: 30 * Math.max(1, days - 1), food: 12 * days, local: 6 * days, activities: 10 * days, buffer: 20 },
+  typicalTotalUSD: Math.round((32 + 45 * Math.max(1, days - 1) + 20 * days + 10 * days + 15 * days + 20) ),
+  packing: ['Comfortable shoes (sample)'],
+  goodToKnow: ['Carry some cash (sample)'],
+});

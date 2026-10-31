@@ -11,16 +11,16 @@ const TIER_INFO = {
 
 /** Tell Orbit your budget in any currency; it suggests destinations in three price tiers */
 export function BudgetPage() {
-  const { user, money, toUSD, setUsage, usage } = useSession();
+  const { money, toUSD, setUsage, usage, currency, requireLogin } = useSession();
   const [form, setForm] = useState({ amount: '', from: '', days: '5', travellers: '1', interests: '', month: '' });
   const [plan, setPlan] = useState<BudgetPlan | null>(null);
   const [meta, setMeta] = useState({ cached: false, sample: false, usd: 0 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const currency = user?.currency ?? 'INR';
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function submit(e?: FormEvent) {
+    e?.preventDefault();
+    if (!requireLogin('The budget planner is free with an account.', () => void submit())) return;
     const amount = Number(form.amount.replace(/,/g, ''));
     if (!(amount > 0)) return setError('Enter your total budget.');
     const usd = toUSD(amount, currency);

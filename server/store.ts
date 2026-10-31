@@ -7,6 +7,16 @@ export interface TripDoc {
   lat: number; lon: number; note: string; createdAt: Date;
 }
 
+export interface PlanDoc {
+  _id: string; userId: string; status: 'upcoming' | 'completed';
+  purpose: string; destination: { name: string; country: string; countryCode: string; lat: number; lon: number };
+  origin: { name: string; lat: number; lon: number };
+  startDate: string; endDate: string; travellers: number; currency: string;
+  plan: unknown; plannedTotalUSD: number; typicalTotalUSD: number;
+  actualSpentUSD: number | null; savedUSD: number | null; distanceKm: number;
+  createdAt: Date; completedAt: Date | null;
+}
+
 /** The data layer: MongoDB Atlas in production, an in-memory stand-in for local development */
 export interface Store {
   findUserByEmail(email: string): Promise<UserDoc | null>;
@@ -17,6 +27,11 @@ export interface Store {
   insertTrip(t: TripDoc): Promise<void>;
   deleteTrip(userId: string, id: string): Promise<boolean>;
   countTrips(userId: string): Promise<number>;
+  listPlans(userId: string): Promise<PlanDoc[]>;
+  insertPlan(p: PlanDoc): Promise<void>;
+  getPlan(userId: string, id: string): Promise<PlanDoc | null>;
+  completePlan(userId: string, id: string, actualSpentUSD: number, savedUSD: number): Promise<boolean>;
+  deletePlan(userId: string, id: string): Promise<boolean>;
   /** Atomically adds 1 to today's AI usage and returns the new total */
   incrementUsage(key: string): Promise<number>;
   getUsage(key: string): Promise<number>;
@@ -39,6 +54,7 @@ async function db(): Promise<Db> {
       await Promise.all([
         d.collection('users').createIndex({ email: 1 }, { unique: true }),
         d.collection('trips').createIndex({ userId: 1, createdAt: -1 }),
+        d.collection('plans').createIndex({ userId: 1, startDate: -1 }),
         // TTL indexes: MongoDB deletes expired usage counters and cache entries automatically
         d.collection('usage').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         d.collection('cache').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
@@ -61,6 +77,17 @@ const mongoStore: Store = {
   async insertTrip(t) { await (await col<TripDoc>('trips')).insertOne(t); },
   async deleteTrip(userId, id) { return (await (await col<TripDoc>('trips')).deleteOne({ _id: id, userId })).deletedCount === 1; },
   async countTrips(userId) { return (await col<TripDoc>('trips')).countDocuments({ userId }); },
+  async listPlans(userId) { return (await col<PlanDoc>('plans')).find({ userId }).sort({ startDate: -1 }).limit(100).toArray(); },
+  async insertPlan(p) { await (await col<PlanDoc>('plans')).insertOne(p); },
+  async getPlan(userId, id) { return (await col<PlanDoc>('plans')).findOne({ _id: id, userId }); },
+  async completePlan(userId, id, actualSpentUSD, savedUSD) {
+    const r = await (await col<PlanDoc>('plans')).updateOne(
+      { _id: id, userId, status: 'upcoming' },
+      { $set: { status: 'completed', actualSpentUSD, savedUSD, completedAt: new Date() } },
+    );
+    return r.modifiedCount === 1;
+  },
+  async deletePlan(userId, id) { return (await (await col<PlanDoc>('plans')).deleteOne({ _id: id, userId })).deletedCount === 1; },
   async incrementUsage(key) {
     const doc = await (await col<UsageDoc>('usage')).findOneAndUpdate(
       { _id: key },
@@ -84,7 +111,7 @@ const mongoStore: Store = {
 };
 
 // ---------------- In memory (local development only) ----------------
-const mem = { users: new Map<string, UserDoc>(), trips: new Map<string, TripDoc>(), usage: new Map<string, number>(), cache: new Map<string, { v: unknown; exp: number }>() };
+const mem = { plans: new Map<string, PlanDoc>(), users: new Map<string, UserDoc>(), trips: new Map<string, TripDoc>(), usage: new Map<string, number>(), cache: new Map<string, { v: unknown; exp: number }>() };
 
 const memoryStore: Store = {
   async findUserByEmail(email) { return [...mem.users.values()].find((u) => u.email === email) ?? null; },
@@ -98,6 +125,16 @@ const memoryStore: Store = {
   async insertTrip(t) { mem.trips.set(t._id, t); },
   async deleteTrip(userId, id) { const t = mem.trips.get(id); return !!t && t.userId === userId && mem.trips.delete(id); },
   async countTrips(userId) { return [...mem.trips.values()].filter((t) => t.userId === userId).length; },
+  async listPlans(userId) { return [...mem.plans.values()].filter((p) => p.userId === userId).sort((a, b) => b.startDate.localeCompare(a.startDate)); },
+  async insertPlan(p) { mem.plans.set(p._id, p); },
+  async getPlan(userId, id) { const p = mem.plans.get(id); return p && p.userId === userId ? p : null; },
+  async completePlan(userId, id, actual, saved) {
+    const p = mem.plans.get(id);
+    if (!p || p.userId !== userId || p.status !== 'upcoming') return false;
+    Object.assign(p, { status: 'completed', actualSpentUSD: actual, savedUSD: saved, completedAt: new Date() });
+    return true;
+  },
+  async deletePlan(userId, id) { const p = mem.plans.get(id); return !!p && p.userId === userId && mem.plans.delete(id); },
   async incrementUsage(key) { const n = (mem.usage.get(key) ?? 0) + 1; mem.usage.set(key, n); return n; },
   async getUsage(key) { return mem.usage.get(key) ?? 0; },
   async cacheGet<T>(key: string) { const e = mem.cache.get(key); return e && e.exp > Date.now() ? (e.v as T) : null; },

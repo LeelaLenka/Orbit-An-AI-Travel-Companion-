@@ -12,13 +12,30 @@ get an **AI briefing** on any town, and find destinations that **fit your budget
 - **Place overview**: description and photo (Wikipedia), plus traveller facts for the country (currency, languages,
   calling code, driving side, time zone)
 - **Famous places within 10 km**, ranked by Wikipedia readership, with photos, pinned on the globe and map
-- **Directions** link and **saved places** per account
+- **Getting there**: distance and time by walk, bike and car over real roads (OSRM / OpenStreetMap routing), plus
+  flight and ship estimates, with a recommended mode; from your location or any place
+- **Coordinates search**: type `18.1135, 83.4019` (or `18.1135° N, 83.4019° E`) to pin an exact spot, named by reverse geocoding
+- **Near you**: with permission, recommends famous places around your current location
+- **Route optimiser**: visits nearby famous places in a short order using nearest-neighbour + 2-opt (TSP heuristics)
+  over a haversine distance matrix, and draws the route on the map
+- **Trip planner** with purpose tags (Pilgrimage, Vacation, Work, Family, Adventure, Other): travel there and back,
+  **real hotels from OpenStreetMap**, food, day-by-day plan and budget; accept to save it
+- **Trip lifecycle**: after the end date Orbit asks what you spent and shows the saving against a typical trip;
+  past trips, total saved and distance travelled are kept in your account
+- **Bine**, a multilingual voice assistant: speak in English, Hindi, Telugu, Tamil and more, and hear the answer in
+  the same language (Web Speech API + Gemini)
+- **Browse without an account**; saving, planning, budgets and Bine ask you to log in when you use them
 - **Live weather**: current conditions and a 7-day forecast (Open-Meteo)
 - **AI destination scan** (Gemini): daily costs at three comfort levels, a cost breakdown, ways to get there,
   laws visitors could break unknowingly, customs, emergency numbers, healthy local food and safety tips
 - **Budget planner**: enter a budget in any of 160+ currencies and get cheap / moderate / expensive destinations,
   converted at live exchange rates, each marked as fitting your budget or not
 - **Accounts required**, with a shared demo account for visitors; installable as an app (PWA)
+
+## Algorithms
+- **Haversine** great-circle distance (server `server/geo.ts`, client `src/lib/geo.ts`)
+- **Nearest-neighbour + 2-opt** route improvement for multi-stop visits, O(n²) per pass
+- **Mode recommendation** rules from distance and real road travel time
 
 ## How it's built
 - **Frontend:** React 19, TypeScript, Vite, globe.gl / three.js, Leaflet

@@ -4,7 +4,7 @@ import { useSession } from '../lib/session';
 
 /** AI briefing for a destination: costs in your currency, getting there, laws, emergency numbers, food */
 export function ScanPanel({ place }: { place: Pick<Place, 'name' | 'admin' | 'country' | 'countryCode'> }) {
-  const { money, setUsage, usage } = useSession();
+  const { money, setUsage, usage, requireLogin } = useSession();
   const [from, setFrom] = useState('');
   const [scan, setScan] = useState<Scan | null>(null);
   const [meta, setMeta] = useState({ cached: false, sample: false });
@@ -17,6 +17,7 @@ export function ScanPanel({ place }: { place: Pick<Place, 'name' | 'admin' | 'co
   }, [place.name, place.country]);
 
   async function run() {
+    if (!requireLogin('AI scans are free with an account, so we can keep the service running for everyone.', () => void run())) return;
     setBusy(true);
     setError('');
     try {
