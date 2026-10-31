@@ -8,6 +8,7 @@ import { PlanPage } from './pages/PlanPage';
 import { TripsPage } from './pages/TripsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PrefsProvider } from './lib/prefs';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function Gate() {
   const { loading } = useSession();
@@ -30,12 +31,14 @@ function Gate() {
 
 export function App() {
   return (
-    <PrefsProvider>
-      <SessionProvider>
-        <BrowserRouter>
-          <Gate />
-        </BrowserRouter>
-      </SessionProvider>
-    </PrefsProvider>
+    <ErrorBoundary>
+      <PrefsProvider>
+        <SessionProvider>
+          <BrowserRouter>
+            <Gate />
+          </BrowserRouter>
+        </SessionProvider>
+      </PrefsProvider>
+    </ErrorBoundary>
   );
 }

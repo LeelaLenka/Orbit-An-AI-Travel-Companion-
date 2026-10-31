@@ -553,3 +553,8 @@ details summary { cursor: pointer; color: var(--teal); }
   .bine-fab span { display: none; }
   .bine-fab { padding: 12px; }
 }
+
+/* ---------- Crash screen ---------- */
+.crash { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+.crash__card { padding: 28px; max-width: 520px; display: grid; gap: 14px; }
+.crash__detail { font-size: 0.8rem; color: var(--muted); white-space: pre-wrap; background: rgba(148, 163, 255, 0.08); padding: 10px 12px; border-radius: 10px; margin: 0; }

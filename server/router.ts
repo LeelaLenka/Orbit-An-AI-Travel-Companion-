@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { z, ZodError } from 'zod';
-import { askBine, budgetInput, chatInput, draftPlan, planBudget, planInput, scanDestination, scanInput, usage } from './ai.js';
+import { aiSelfTest, askBine, budgetInput, chatInput, draftPlan, planBudget, planInput, scanDestination, scanInput, usage } from './ai.js';
 import { endSession, ensureDemoUser, login, loginSchema, register, registerSchema, requireUser, startSession, toPublic } from './auth.js';
 import { DEMO } from './env.js';
 import { getFeatured, getHotels, getPlaceInfo, getRates, getRoute, getSatelliteImage, getWeather, searchPlaces } from './external.js';
@@ -32,7 +32,14 @@ export async function handle(req: Req, res: Res): Promise<void> {
 
   try {
     // ---------- public ----------
-    if (route === 'health') return sendJson(res, 200, { ok: true, store: usingMemoryStore ? 'memory' : 'mongodb' });
+    if (route === 'health') {
+      const body: Record<string, unknown> = { ok: true, store: usingMemoryStore ? 'memory' : 'mongodb' };
+      if (q('ai') === '1') {
+        await throttle(req, 'aitest', 10);
+        body.ai = await aiSelfTest();
+      }
+      return sendJson(res, 200, body);
+    }
 
     if (route === 'satellite' && method === 'GET') {
       const img = await getSatelliteImage();

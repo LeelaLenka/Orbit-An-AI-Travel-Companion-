@@ -85,6 +85,7 @@ export function Bine() {
     const r = new SpeechRec();
     r.lang = lang;
     r.interimResults = true;
+    setText('');
     r.continuous = false;
     let finalText = '';
     r.onresult = (e) => {
@@ -92,7 +93,15 @@ export function Bine() {
       setText(parts.map((p) => p[0]?.transcript ?? '').join(' '));
       if (parts.every((p) => p.isFinal)) finalText = parts.map((p) => p[0]?.transcript ?? '').join(' ');
     };
-    r.onerror = (e) => setError(e.error === 'not-allowed' ? 'Microphone permission was denied.' : 'Didn’t catch that. Try again.');
+    r.onerror = (e) => setError(({
+      'not-allowed': 'Microphone access is blocked. Allow it in the address bar (the mic or lock icon), then try again.',
+      'service-not-allowed': 'Microphone access is blocked. Allow it in the address bar (the mic or lock icon), then try again.',
+      'no-speech': 'I didn’t hear anything. Tap the mic and start speaking straight away.',
+      'audio-capture': 'No microphone was found. Check that one is connected, or type instead.',
+      'network': 'Voice recognition needs a connection to your browser’s speech service. Check your internet, or type instead.',
+      'language-not-supported': 'Voice input in this language isn’t available in this browser. Type instead, or pick English.',
+      'aborted': '',
+    } as Record<string, string>)[e.error] ?? `Voice input stopped (${e.error}). You can type instead.`);
     r.onend = () => {
       setListening(false);
       if (finalText) void send(finalText);
@@ -130,7 +139,7 @@ export function Bine() {
           <div className="bine__log" aria-live="polite">
             {msgs.length === 0 && (
               <div className="bine__hello">
-                <p>Hi! Ask me anything about a trip.</p>
+                <p>Hi! I’m Bine. Ask me anything: trips, places, budgets, or any other question.</p>
                 <div className="chips">
                   {['Best time to visit Munnar?', 'Plan 2 days in Hampi', 'Is Tirupati crowded on weekends?'].map((s) => (
                     <button key={s} onClick={() => void send(s)}>{s}</button>

@@ -10,7 +10,64 @@ import { store, type UserDoc } from './store.js';
  * validated with Zod, cached in MongoDB, and limited per user per day to protect the free quota.
  */
 
-const ai = env.geminiKey ? new GoogleGenAI({ apiKey: env.geminiKey }) : null;
+const ai = env.geminiKey
+  ? new GoogleGenAI({ apiKey: env.geminiKey, ...(env.geminiBaseUrl ? { httpOptions: { baseUrl: env.geminiBaseUrl } } : {}) })
+  : null;
+
+/**
+ * Models to try, in order. Google retires model names over time, so if the configured one is gone
+ * we fall back to the "latest Flash" alias and then older names, and remember whichever works.
+ */
+const MODELS = [...new Set([env.geminiModel, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter(Boolean))];
+let workingModel: string | null = null;
+
+type GenParams = Omit<Parameters<NonNullable<typeof ai>['models']['generateContent']>[0], 'model'>;
+
+/** Turns a Gemini error into a message the user can act on (the raw error goes to the server log) */
+function aiError(e: unknown): HttpError {
+  const msg = String((e as Error)?.message ?? e);
+  console.error('[orbit] Gemini error:', msg.slice(0, 500));
+  if (/API_KEY_INVALID|API key not valid|invalid api key/i.test(msg)) return new HttpError(503, 'The AI key isn’t valid. The site owner needs to update GEMINI_API_KEY in Vercel.');
+  if (/PERMISSION_DENIED|403/.test(msg)) return new HttpError(503, 'The AI key doesn’t have access to Gemini. The site owner needs to check the key in Google AI Studio.');
+  if (/429|quota|RESOURCE_EXHAUSTED/i.test(msg)) return new HttpError(503, 'The AI is busy right now (free quota reached). Try again in a minute.');
+  if (/SAFETY|blocked/i.test(msg)) return new HttpError(422, 'The AI couldn’t answer that request. Try rephrasing it.');
+  if (/not found|NOT_FOUND|404|not supported/i.test(msg)) return new HttpError(503, 'No available Gemini model was found for this key. The site owner needs to set GEMINI_MODEL in Vercel.');
+  if (/timeout|aborted|ETIMEDOUT|fetch failed/i.test(msg)) return new HttpError(504, 'The AI took too long to answer. Try again.');
+  return new HttpError(502, 'The AI service didn’t respond. Try again.');
+}
+
+const isModelMissing = (e: unknown) => /not found|NOT_FOUND|404|is not supported|unsupported model/i.test(String((e as Error)?.message ?? e));
+
+/** Calls Gemini with model fallback; returns the reply text */
+async function callGemini(params: GenParams): Promise<{ text: string; model: string }> {
+  if (!ai) throw new Error('no-ai');
+  const order = workingModel ? [workingModel, ...MODELS.filter((m) => m !== workingModel)] : MODELS;
+  let last: unknown = null;
+  for (const model of order) {
+    try {
+      const r = await ai.models.generateContent({ ...params, model });
+      const text = (r.text ?? '').trim();
+      if (!text) throw new Error(`empty response (finish reason: ${r.candidates?.[0]?.finishReason ?? 'unknown'})`);
+      workingModel = model;
+      return { text, model };
+    } catch (e) {
+      last = e;
+      if (!isModelMissing(e)) break; // a real error (key, quota, safety): don't try other models
+    }
+  }
+  throw aiError(last);
+}
+
+/** Used by /api/health?ai=1 so the owner can check the key and model in one click */
+export async function aiSelfTest(): Promise<{ configured: boolean; ok: boolean; model: string | null; error: string | null }> {
+  if (!ai) return { configured: false, ok: false, model: null, error: 'GEMINI_API_KEY is not set' };
+  try {
+    const r = await callGemini({ contents: 'Reply with the single word OK.', config: { maxOutputTokens: 256 } });
+    return { configured: true, ok: true, model: r.model, error: null };
+  } catch (e) {
+    return { configured: true, ok: false, model: null, error: (e as Error).message };
+  }
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const usageKey = (u: UserDoc) => `${u._id}:${today()}`;
@@ -21,39 +78,32 @@ export async function usage(u: UserDoc) {
   return { used, limit: limitFor(u), remaining: Math.max(0, limitFor(u) - used), aiEnabled: !!ai };
 }
 
-async function spendOne(u: UserDoc): Promise<void> {
-  const n = await store.incrementUsage(usageKey(u));
-  if (n > limitFor(u)) {
+/** Refuses when today's allowance is used up (checked before calling the AI) */
+async function checkAllowance(u: UserDoc): Promise<void> {
+  if ((await store.getUsage(usageKey(u))) >= limitFor(u)) {
     throw new HttpError(429, `You’ve used today’s ${limitFor(u)} AI requests. They reset at midnight UTC; saved results still work.`);
   }
 }
+/** Counts a request, only after the AI actually answered */
+const spendOne = (u: UserDoc) => store.incrementUsage(usageKey(u));
 
 async function generate(prompt: string, schema: object, temperature = 0.4): Promise<unknown> {
-  if (!ai) throw new Error('no-ai');
-  let text: string | undefined;
+  const { text } = await callGemini({
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseJsonSchema: schema,
+      temperature, // low = steadier, more factual answers
+      systemInstruction:
+        'You are Orbit, a careful travel researcher. Give realistic, current-as-possible information. ' +
+        'Costs are typical estimates in US dollars; never invent brand names, prices from specific websites, or offers. ' +
+        'If you are unsure of a fact (for example an emergency number), say so in that field rather than guessing.',
+    },
+  });
   try {
-    const r = await ai.models.generateContent({
-      model: env.geminiModel,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseJsonSchema: schema,
-        temperature, // low = steadier, more factual answers
-        systemInstruction:
-          'You are Orbit, a careful travel researcher. Give realistic, current-as-possible information. ' +
-          'Costs are typical estimates in US dollars for one traveller; never invent brand names, prices from specific websites, or offers. ' +
-          'If you are unsure of a fact (for example an emergency number), say so in that field rather than guessing.',
-      },
-    });
-    text = r.text;
-  } catch (e) {
-    const msg = String((e as Error).message ?? e);
-    if (/429|quota|RESOURCE_EXHAUSTED/i.test(msg)) throw new HttpError(503, 'The AI service is busy (free quota reached). Try again in a minute.');
-    throw new HttpError(502, 'The AI service didn’t respond. Try again.');
-  }
-  try {
-    return JSON.parse(text ?? '');
+    return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
   } catch {
+    console.error('[orbit] AI returned non-JSON:', text.slice(0, 300));
     throw new HttpError(502, 'The AI returned an unreadable answer. Try again.');
   }
 }
@@ -111,7 +161,7 @@ export async function scanDestination(u: UserDoc, input: z.infer<typeof scanInpu
   const hit = await store.cacheGet<Scan>(key);
   if (hit) return { scan: hit, cached: true, sample: false };
 
-  await spendOne(u);
+  await checkAllowance(u);
   const place = [input.name, input.admin, input.country].filter(Boolean).join(', ');
   const raw = await generate(
     `Destination: ${place}.` + (input.from ? ` The traveller is coming from ${input.from}; "gettingThere" should cover realistic options from there.` : ' "gettingThere" should cover typical ways visitors arrive.') +
@@ -119,6 +169,7 @@ export async function scanDestination(u: UserDoc, input: z.infer<typeof scanInpu
     scanJsonSchema);
   const parsed = scanSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(502, 'The AI answer was incomplete. Try again.');
+  await spendOne(u);
   await store.cacheSet(key, parsed.data, 7 * 86_400); // shared by everyone who scans this place this week
   return { scan: parsed.data, cached: false, sample: false };
 }
@@ -178,7 +229,7 @@ export async function planBudget(u: UserDoc, input: z.infer<typeof budgetInput>)
   const hit = await store.cacheGet<Budget>(key);
   if (hit) return { plan: hit, cached: true, sample: false };
 
-  await spendOne(u);
+  await checkAllowance(u);
   const raw = await generate(
     `A group of ${input.travellers} travelling from ${input.from} for ${input.days} days` +
       (input.month ? ` in ${input.month}` : '') + ` has a total budget of about ${Math.round(input.amountUSD)} US dollars` +
@@ -188,6 +239,7 @@ export async function planBudget(u: UserDoc, input: z.infer<typeof budgetInput>)
     budgetJsonSchema);
   const parsed = budgetSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(502, 'The AI answer was incomplete. Try again.');
+  await spendOne(u);
   await store.cacheSet(key, parsed.data, 3 * 86_400);
   return { plan: parsed.data, cached: false, sample: false };
 }
@@ -242,7 +294,7 @@ export async function draftPlan(u: UserDoc, input: z.infer<typeof planInput>, co
   const days = Math.round((Date.parse(input.endDate) - Date.parse(input.startDate)) / 86_400_000) + 1;
   if (!(days >= 1 && days <= 30)) throw new HttpError(400, 'Trips can be 1 to 30 days; check the dates.');
   if (!ai) return { plan: tripPlanSchema.parse(mock.tripPlan(input.destination.name, days)), sample: true };
-  await spendOne(u);
+  await checkAllowance(u);
   const raw = await generate(
     `Plan a ${input.purpose.toLowerCase()} trip for ${input.travellers} traveller(s) from ${input.origin.name} to ${input.destination.name}, ${input.destination.country}, ` +
       `${input.startDate} to ${input.endDate} (${days} days).` +
@@ -256,7 +308,11 @@ export async function draftPlan(u: UserDoc, input: z.infer<typeof planInput>, co
       `Give one "days" entry per day (${days} days), costs for the whole group in USD, and a realistic typicalTotalUSD for an unplanned trip.`,
     tripPlanJsonSchema, 0.5);
   const parsed = tripPlanSchema.safeParse(raw);
-  if (!parsed.success) throw new HttpError(502, 'The AI plan was incomplete. Try again.');
+  if (!parsed.success) {
+    console.error('[orbit] plan schema mismatch:', parsed.error.issues.slice(0, 3));
+    throw new HttpError(502, 'The AI plan was incomplete. Try again.');
+  }
+  await spendOne(u);
   return { plan: parsed.data, sample: false };
 }
 
@@ -272,14 +328,14 @@ export interface BineContext { currency: string; upcoming: string[]; past: strin
 
 export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>, ctx: BineContext): Promise<{ reply: string; sample: boolean }> {
   if (!ai) return { reply: `(Sample) I am Bine. Add a Gemini key and I will answer in ${input.language}.`, sample: true };
-  await spendOne(u);
-  try {
-    const r = await ai.models.generateContent({
-      model: env.geminiModel,
-      contents: input.messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 400,
+  await checkAllowance(u);
+  // Gemini needs the conversation to start with the user and alternate roles
+  const turns = input.messages.slice(input.messages.findIndex((m) => m.role === 'user'));
+  const { text } = await callGemini({
+    contents: turns.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
+    config: {
+      temperature: 0.6,
+      maxOutputTokens: 1024,
         systemInstruction:
           `You are Bine, the friendly assistant inside the Orbit travel app. Reply in the same language the user writes in; if unsure, use ${input.language}. ` +
           'Your reply will be read aloud, so use short plain sentences, no markdown, no lists longer than 4 items, at most about 120 words. ' +
@@ -289,15 +345,8 @@ export async function askBine(u: UserDoc, input: z.infer<typeof chatInput>, ctx:
           `\nAbout this user: name ${u.name}; preferred currency ${ctx.currency}; today is ${ctx.today}. ` +
           `Upcoming trips: ${ctx.upcoming.join('; ') || 'none'}. Past trips: ${ctx.past.join('; ') || 'none'}. Saved places: ${ctx.saved.join(', ') || 'none'}. ` +
           (input.place ? `They are currently looking at: ${input.place}.` : ''),
-      },
-    });
-    const text = (r.text ?? '').trim();
-    if (!text) throw new Error('empty');
-    return { reply: text.slice(0, 1500), sample: false };
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    const msg = String((e as Error).message ?? e);
-    if (/429|quota|RESOURCE_EXHAUSTED/i.test(msg)) throw new HttpError(503, 'Bine is busy right now (free quota reached). Try again in a minute.');
-    throw new HttpError(502, 'Bine couldn’t answer. Try again.');
-  }
+    },
+  });
+  await spendOne(u);
+  return { reply: text.slice(0, 1500), sample: false };
 }
