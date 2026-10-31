@@ -36,14 +36,21 @@ function aiError(e: unknown): HttpError {
   return new HttpError(502, 'The AI service didn’t respond. Try again.');
 }
 
-const isModelMissing = (e: unknown) => /not found|NOT_FOUND|404|is not supported|unsupported model/i.test(String((e as Error)?.message ?? e));
+/** Errors where a different model might work: unknown/retired/invalid model name, or an empty (thinking-only) reply */
+const tryAnotherModel = (e: unknown) =>
+  /not found|NOT_FOUND|404|is not supported|unsupported model|model.*(invalid|not valid)|invalid.*model|unexpected model|empty response/i.test(String((e as Error)?.message ?? e));
+
+/** The raw error text, without anything that could be a key, for the owner's self-test */
+const rawError = (e: unknown) => String((e as Error)?.message ?? e).replace(/AIza[0-9A-Za-z_-]{20,}/g, '[key]').slice(0, 400);
 
 /** Calls Gemini with model fallback; returns the reply text */
 async function callGemini(params: GenParams): Promise<{ text: string; model: string }> {
   if (!ai) throw new Error('no-ai');
   const order = workingModel ? [workingModel, ...MODELS.filter((m) => m !== workingModel)] : MODELS;
   let last: unknown = null;
+  const tried: string[] = [];
   for (const model of order) {
+    tried.push(model);
     try {
       const r = await ai.models.generateContent({ ...params, model });
       const text = (r.text ?? '').trim();
@@ -52,20 +59,24 @@ async function callGemini(params: GenParams): Promise<{ text: string; model: str
       return { text, model };
     } catch (e) {
       last = e;
-      if (!isModelMissing(e)) break; // a real error (key, quota, safety): don't try other models
+      console.error(`[orbit] Gemini model ${model} failed:`, rawError(e));
+      if (!tryAnotherModel(e)) break; // a real error (key, quota, safety): don't try other models
     }
   }
-  throw aiError(last);
+  const err = aiError(last);
+  (err as HttpError & { detail?: string }).detail = `tried ${tried.join(', ')}: ${rawError(last)}`;
+  throw err;
 }
 
 /** Used by /api/health?ai=1 so the owner can check the key and model in one click */
-export async function aiSelfTest(): Promise<{ configured: boolean; ok: boolean; model: string | null; error: string | null }> {
-  if (!ai) return { configured: false, ok: false, model: null, error: 'GEMINI_API_KEY is not set' };
+export async function aiSelfTest(): Promise<{ configured: boolean; ok: boolean; model: string | null; configuredModel: string | null; error: string | null; detail: string | null }> {
+  const configuredModel = env.geminiModel || null;
+  if (!ai) return { configured: false, ok: false, model: null, configuredModel, error: 'GEMINI_API_KEY is not set', detail: null };
   try {
-    const r = await callGemini({ contents: 'Reply with the single word OK.', config: { maxOutputTokens: 256 } });
-    return { configured: true, ok: true, model: r.model, error: null };
+    const r = await callGemini({ contents: 'Reply with the single word OK.', config: { maxOutputTokens: 1024 } });
+    return { configured: true, ok: true, model: r.model, configuredModel, error: null, detail: null };
   } catch (e) {
-    return { configured: true, ok: false, model: null, error: (e as Error).message };
+    return { configured: true, ok: false, model: null, configuredModel, error: (e as Error).message, detail: (e as { detail?: string }).detail ?? rawError(e) };
   }
 }
 
